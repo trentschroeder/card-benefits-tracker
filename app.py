@@ -570,6 +570,7 @@ def benefit_redemptions(id):
         return redirect(url_for('dashboard'))
     enriched = enrich_benefit(db, b)
 
+    # Build last-year period history
     _n_map = {'monthly': 12, 'quarterly': 4, 'semi-annual': 2, 'annual': 1}
     period_history = []
     period_states  = {}
@@ -587,12 +588,9 @@ def benefit_redemptions(id):
             ).fetchone()
             amount_used = float(pr['total'])
             if enriched['credit_amount']:
-                if amount_used >= enriched['credit_amount']:
-                    state = 'full'
-                elif amount_used > 0:
-                    state = 'partial'
-                else:
-                    state = 'none'
+                if amount_used >= enriched['credit_amount']:   state = 'full'
+                elif amount_used > 0:                          state = 'partial'
+                else:                                          state = 'none'
             else:
                 state = 'full' if pr['cnt'] > 0 else 'none'
         period_history.append({'period_start': p_start, 'period_end': p_end,
@@ -601,13 +599,50 @@ def benefit_redemptions(id):
         check_date = p_start - timedelta(days=1)
     period_history.reverse()
 
-    redemptions = db.execute(
-        'SELECT * FROM redemptions WHERE benefit_id = ? ORDER BY redeemed_at DESC',
-        (id,)
+    # Group all redemptions by period_start
+    from collections import defaultdict
+    all_redemptions = db.execute(
+        'SELECT * FROM redemptions WHERE benefit_id=? ORDER BY period_start DESC, redeemed_at DESC', (id,)
     ).fetchall()
+    redemptions_by_period = defaultdict(list)
+    for r in all_redemptions:
+        redemptions_by_period[r['period_start']].append(r)
+
+    # Older periods (beyond last year) that have redemptions
+    oldest_in_range = str(period_history[0]['period_start']) if period_history else None
+    has_older = bool(oldest_in_range and db.execute(
+        'SELECT 1 FROM redemptions WHERE benefit_id=? AND period_start<? LIMIT 1',
+        (id, oldest_in_range)
+    ).fetchone())
+
+    show_all = request.args.get('all') == '1'
+    older_periods = []
+    if show_all and oldest_in_range:
+        old_starts = db.execute(
+            'SELECT DISTINCT period_start FROM redemptions WHERE benefit_id=? AND period_start<? ORDER BY period_start DESC',
+            (id, oldest_in_range)
+        ).fetchall()
+        for row in old_starts:
+            ps_str  = row['period_start']
+            ps_date = date.fromisoformat(ps_str)
+            p_start, p_end = get_current_period(enriched['period_type'], for_date=ps_date)
+            rds         = redemptions_by_period.get(ps_str, [])
+            amount_used = float(sum(r['amount'] or 0 for r in rds))
+            if enriched['credit_amount']:
+                if amount_used >= enriched['credit_amount']:   state = 'full'
+                elif amount_used > 0:                          state = 'partial'
+                else:                                          state = 'none'
+            else:
+                state = 'full' if rds else 'none'
+            older_periods.append({'period_start': p_start, 'period_end': p_end,
+                                   'amount_used': amount_used, 'state': state})
+            period_states[ps_str] = state
+
     db.close()
-    return render_template('benefits/redemptions.html', benefit=enriched, redemptions=redemptions,
-                           period_history=period_history, period_states=period_states)
+    return render_template('benefits/redemptions.html', benefit=enriched,
+                           period_history=period_history, period_states=period_states,
+                           redemptions_by_period=dict(redemptions_by_period),
+                           older_periods=older_periods, has_older=has_older, show_all=show_all)
 
 
 # ── Settings ───────────────────────────────────────────────────────────────────

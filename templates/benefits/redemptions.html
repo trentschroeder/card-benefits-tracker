@@ -10,6 +10,27 @@
     flex-shrink: 0;
     cursor: default;
   }
+  .period-row { cursor: pointer; user-select: none; }
+  .detail-row > td {
+    background: var(--bg-table-head) !important;
+    padding: 0 !important;
+    border-bottom: 2px solid var(--border-color) !important;
+  }
+  .detail-inner {
+    padding: 6px 12px 10px 40px;
+  }
+  .detail-inner .table { margin-bottom: 0; font-size: .83rem; }
+  .detail-inner .table td { border: none; padding: 4px 8px; color: var(--text-muted); }
+  .detail-inner .table td:first-child { color: var(--text-primary); }
+  .period-chevron { font-size: .7rem; color: var(--text-muted); transition: transform .15s; }
+  .older-divider td {
+    font-size: .72rem;
+    text-transform: uppercase;
+    letter-spacing: .06em;
+    color: var(--text-muted);
+    background: var(--bg-table-head) !important;
+    padding: 6px 12px !important;
+  }
 </style>
 {% endblock %}
 
@@ -161,80 +182,201 @@
 </div>
 {% endif %}
 
-<!-- Period utilization timeline -->
-<h5 class="mb-2">History</h5>
-{% if period_history %}
-<div class="mb-3">
-  <div class="d-flex flex-wrap gap-1 align-items-center mb-1">
+<!-- Utilization History -->
+<div class="card p-3 mb-4">
+
+  <!-- Header -->
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h6 class="mb-0">Utilization History</h6>
+    <div class="d-flex gap-3" style="font-size:.72rem; color:var(--text-muted);">
+      <span><span class="util-dot me-1" style="background:#198754; vertical-align:middle;"></span>Full</span>
+      <span><span class="util-dot me-1" style="background:#e67e22; vertical-align:middle;"></span>Partial</span>
+      <span><span class="util-dot me-1" style="background:#dc3545; vertical-align:middle;"></span>Unused</span>
+    </div>
+  </div>
+
+  <!-- Dot timeline (last year) -->
+  {% if period_history %}
+  <div class="d-flex flex-wrap gap-1 mb-4 pb-3" style="border-bottom:1px solid var(--border-color);">
     {% for p in period_history %}
-      {% if p.state == 'full' %}
-        {% set dot_bg = '#198754' %}
-      {% elif p.state == 'partial' %}
-        {% set dot_bg = '#e67e22' %}
-      {% else %}
-        {% set dot_bg = '#dc3545' %}
-      {% endif %}
-      {% set tip_date = p.period_start.strftime('%b %Y') %}
+      {% if p.state == 'full' %}{% set dot_bg = '#198754' %}
+      {% elif p.state == 'partial' %}{% set dot_bg = '#e67e22' %}
+      {% else %}{% set dot_bg = '#dc3545' %}{% endif %}
       {% if benefit.credit_amount %}
-        {% set tip_detail = ' · $' ~ '%.2f'|format(p.amount_used) ~ ' / $' ~ '%.2f'|format(benefit.credit_amount) %}
+        {% set tip = p.period_start.strftime('%b %Y') ~ ' · $' ~ '%.2f'|format(p.amount_used) ~ ' / $' ~ '%.2f'|format(benefit.credit_amount) %}
       {% elif p.state == 'full' %}
-        {% set tip_detail = ' · Used' %}
+        {% set tip = p.period_start.strftime('%b %Y') ~ ' · Used' %}
       {% else %}
-        {% set tip_detail = ' · Not used' %}
+        {% set tip = p.period_start.strftime('%b %Y') ~ ' · Unused' %}
       {% endif %}
-      <span class="util-dot"
-            style="background:{{ dot_bg }};"
-            data-bs-toggle="tooltip"
-            title="{{ tip_date }}{{ tip_detail }}"></span>
+      <span class="util-dot" style="background:{{ dot_bg }};" data-bs-toggle="tooltip" title="{{ tip }}"></span>
     {% endfor %}
   </div>
-  <div class="d-flex gap-3" style="font-size:.72rem; color:var(--text-muted);">
-    <span><span class="util-dot" style="background:#198754; vertical-align:middle;"></span> Full</span>
-    <span><span class="util-dot" style="background:#e67e22; vertical-align:middle;"></span> Partial</span>
-    <span><span class="util-dot" style="background:#dc3545; vertical-align:middle;"></span> Not used</span>
-  </div>
-</div>
-{% endif %}
+  {% endif %}
 
-{% if not redemptions %}
-  <div class="text-muted">No redemptions recorded yet.</div>
-{% else %}
-<div class="table-responsive">
-  <table class="table table-hover align-middle">
-    <thead>
-      <tr>
-        <th style="width:1rem;"></th>
-        <th>Period</th>
-        <th>Amount</th>
-        <th>Notes</th>
-        <th>Recorded At</th>
-        <th></th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for r in redemptions %}
-      {% set state = period_states.get(r.period_start, 'none') %}
-      {% if state == 'full' %}{% set row_dot_bg = '#198754' %}
-      {% elif state == 'partial' %}{% set row_dot_bg = '#e67e22' %}
-      {% else %}{% set row_dot_bg = '#dc3545' %}{% endif %}
-      <tr>
-        <td><span class="util-dot" style="background:{{ row_dot_bg }};"></span></td>
-        <td>{{ r.period_start }}</td>
-        <td>{% if r.amount %}${{ "%.2f"|format(r.amount) }}{% else %}<span class="text-muted">—</span>{% endif %}</td>
-        <td>{{ r.notes or '—' }}</td>
-        <td class="text-muted small">{{ r.redeemed_at }}</td>
-        <td class="text-end">
-          <form method="post" action="{{ url_for('redemption_delete', id=r.id) }}"
-                onsubmit="return confirm('Remove this redemption?')">
-            <button class="btn btn-outline-danger btn-sm"><i class="bi bi-trash"></i></button>
-          </form>
-        </td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
+  <!-- Period table -->
+  <div class="table-responsive">
+    <table class="table align-middle mb-0" style="font-size:.88rem;">
+      <thead>
+        <tr style="font-size:.75rem; text-transform:uppercase; letter-spacing:.05em; color:var(--text-muted);">
+          <th style="width:1.5rem;"></th>
+          <th>Period</th>
+          <th>{{ 'Utilized' if benefit.credit_amount else 'Status' }}</th>
+          <th style="width:1.5rem;"></th>
+        </tr>
+      </thead>
+      <tbody>
+
+        {% for p in period_history | reverse %}
+          {%- set ps = p.period_start.isoformat() -%}
+          {%- set entries = redemptions_by_period.get(ps, []) -%}
+          {%- if p.state == 'full' -%}{%- set dot_bg = '#198754' -%}
+          {%- elif p.state == 'partial' -%}{%- set dot_bg = '#e67e22' -%}
+          {%- else -%}{%- set dot_bg = '#dc3545' -%}{%- endif -%}
+
+          <tr class="period-row" onclick="toggleDetail('{{ ps }}')">
+            <td><span class="util-dot" style="background:{{ dot_bg }};"></span></td>
+            <td>{{ p.period_start.strftime('%b %Y') }}</td>
+            <td>
+              {% if benefit.credit_amount %}
+                {% set pct = [(p.amount_used / benefit.credit_amount * 100)|int, 100]|min %}
+                <div class="d-flex align-items-center gap-2">
+                  <span>${{ '%.2f'|format(p.amount_used) }} / ${{ '%.2f'|format(benefit.credit_amount) }}</span>
+                  <div class="progress flex-shrink-0" style="width:56px; height:5px;">
+                    <div class="progress-bar {{ 'bg-success' if p.state == 'full' else ('bg-warning' if p.state == 'partial' else 'bg-danger') }}"
+                         style="width:{{ pct }}%;"></div>
+                  </div>
+                </div>
+              {% elif p.state == 'full' %}
+                <span class="text-success">Used</span>
+              {% else %}
+                <span class="text-muted">—</span>
+              {% endif %}
+            </td>
+            <td class="text-end">
+              {% if entries %}
+                <i class="bi bi-chevron-right period-chevron" id="chev-{{ ps }}"></i>
+              {% endif %}
+            </td>
+          </tr>
+
+          {% if entries %}
+          <tr id="detail-{{ ps }}" style="display:none;" class="detail-row">
+            <td colspan="4">
+              <div class="detail-inner">
+                <table class="table table-sm">
+                  <tbody>
+                    {% for r in entries %}
+                    <tr>
+                      <td style="width:110px;">{{ r.redeemed_at[:10] }}</td>
+                      <td style="width:90px;">
+                        {% if r.amount %}<span class="fw-semibold" style="color:var(--text-primary);">${{ '%.2f'|format(r.amount) }}</span>{% else %}—{% endif %}
+                      </td>
+                      <td>{{ r.notes or '' }}</td>
+                      <td class="text-end" style="width:48px;">
+                        <form method="post" action="{{ url_for('redemption_delete', id=r.id) }}"
+                              onsubmit="return confirm('Remove this entry?')">
+                          <button class="btn btn-outline-danger btn-sm py-0 px-1" style="font-size:.7rem;">
+                            <i class="bi bi-trash"></i>
+                          </button>
+                        </form>
+                      </td>
+                    </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+            </td>
+          </tr>
+          {% endif %}
+
+        {% endfor %}
+
+        {% if older_periods %}
+        <tr class="older-divider"><td colspan="4">Earlier</td></tr>
+        {% for p in older_periods %}
+          {%- set ps = p.period_start.isoformat() -%}
+          {%- set entries = redemptions_by_period.get(ps, []) -%}
+          {%- if p.state == 'full' -%}{%- set dot_bg = '#198754' -%}
+          {%- elif p.state == 'partial' -%}{%- set dot_bg = '#e67e22' -%}
+          {%- else -%}{%- set dot_bg = '#dc3545' -%}{%- endif -%}
+
+          <tr class="period-row" onclick="toggleDetail('{{ ps }}')">
+            <td><span class="util-dot" style="background:{{ dot_bg }};"></span></td>
+            <td>{{ p.period_start.strftime('%b %Y') }}</td>
+            <td>
+              {% if benefit.credit_amount %}
+                {% set pct = [(p.amount_used / benefit.credit_amount * 100)|int, 100]|min %}
+                <div class="d-flex align-items-center gap-2">
+                  <span>${{ '%.2f'|format(p.amount_used) }} / ${{ '%.2f'|format(benefit.credit_amount) }}</span>
+                  <div class="progress flex-shrink-0" style="width:56px; height:5px;">
+                    <div class="progress-bar {{ 'bg-success' if p.state == 'full' else ('bg-warning' if p.state == 'partial' else 'bg-danger') }}"
+                         style="width:{{ pct }}%;"></div>
+                  </div>
+                </div>
+              {% elif p.state == 'full' %}
+                <span class="text-success">Used</span>
+              {% else %}
+                <span class="text-muted">—</span>
+              {% endif %}
+            </td>
+            <td class="text-end">
+              {% if entries %}
+                <i class="bi bi-chevron-right period-chevron" id="chev-{{ ps }}"></i>
+              {% endif %}
+            </td>
+          </tr>
+
+          {% if entries %}
+          <tr id="detail-{{ ps }}" style="display:none;" class="detail-row">
+            <td colspan="4">
+              <div class="detail-inner">
+                <table class="table table-sm">
+                  <tbody>
+                    {% for r in entries %}
+                    <tr>
+                      <td style="width:110px;">{{ r.redeemed_at[:10] }}</td>
+                      <td style="width:90px;">
+                        {% if r.amount %}<span class="fw-semibold" style="color:var(--text-primary);">${{ '%.2f'|format(r.amount) }}</span>{% else %}—{% endif %}
+                      </td>
+                      <td>{{ r.notes or '' }}</td>
+                      <td class="text-end" style="width:48px;">
+                        <form method="post" action="{{ url_for('redemption_delete', id=r.id) }}"
+                              onsubmit="return confirm('Remove this entry?')">
+                          <button class="btn btn-outline-danger btn-sm py-0 px-1" style="font-size:.7rem;">
+                            <i class="bi bi-trash"></i>
+                          </button>
+                        </form>
+                      </td>
+                    </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+            </td>
+          </tr>
+          {% endif %}
+
+        {% endfor %}
+        {% endif %}
+
+      </tbody>
+    </table>
+  </div>
+
+  {% if has_older and not show_all %}
+  <div class="text-center mt-3">
+    <a href="?all=1" class="btn btn-outline-secondary btn-sm">
+      <i class="bi bi-clock-history me-1"></i>Show full history
+    </a>
+  </div>
+  {% endif %}
+
+  {% if not period_history and not older_periods %}
+  <div class="text-muted text-center py-3">No history yet.</div>
+  {% endif %}
+
 </div>
-{% endif %}
 
 {% endblock %}
 
@@ -243,5 +385,14 @@
   document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => {
     new bootstrap.Tooltip(el, { trigger: 'hover focus' });
   });
+
+  function toggleDetail(ps) {
+    var row  = document.getElementById('detail-' + ps);
+    var chev = document.getElementById('chev-' + ps);
+    if (!row) return;
+    var open = row.style.display === 'none';
+    row.style.display = open ? 'table-row' : 'none';
+    if (chev) chev.style.transform = open ? 'rotate(90deg)' : '';
+  }
 </script>
 {% endblock %}
