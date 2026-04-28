@@ -1,0 +1,130 @@
+{% extends 'base.html' %}
+{% block title %}{% if benefit %}Edit Benefit{% else %}New Benefit{% endif %} — Card Benefits{% endblock %}
+{% block content %}
+
+<div class="row justify-content-center">
+  <div class="col-lg-7">
+    <div class="card p-4">
+      <h4 class="mb-1">{% if benefit %}Edit Benefit{% else %}Add Benefit{% endif %}</h4>
+      <p class="text-muted mb-4">
+        Card: <strong>{{ card.name }}{% if card.last_four %} …{{ card.last_four }}{% endif %}</strong>
+      </p>
+
+      <form method="post">
+        <div class="mb-3">
+          <label class="form-label">Benefit Name <span class="text-danger">*</span></label>
+          <input name="name" type="text" class="form-control"
+                 value="{{ form.get('name', '') }}"
+                 placeholder="e.g. Travel Credit" required>
+        </div>
+
+        <div class="mb-3">
+          <label class="form-label">Description</label>
+          <input name="description" type="text" class="form-control"
+                 value="{{ form.get('description', '') or '' }}"
+                 placeholder="e.g. Up to $300 for travel purchases">
+        </div>
+
+        <div class="mb-3">
+          <label class="form-label">Credit Amount ($)</label>
+          <input name="credit_amount" type="number" step="0.01" min="0" class="form-control"
+                 value="{{ form.get('credit_amount', '') or '' }}"
+                 placeholder="Leave blank for non-dollar benefits (e.g. lounge access)">
+          <div class="form-text">Leave blank to track as used/not-used rather than by dollar amount.</div>
+        </div>
+
+        <div class="mb-3">
+          <label class="form-label">Renewal Period <span class="text-danger">*</span></label>
+          <select name="period_type" class="form-select">
+            {% for key, label in period_labels.items() %}
+              <option value="{{ key }}"
+                {% if form.get('period_type', 'monthly') == key %}selected{% endif %}>
+                {{ label }}
+              </option>
+            {% endfor %}
+          </select>
+          <div class="form-text">Periods align to the calendar (monthly = 1st of month; quarterly = Jan/Apr/Jul/Oct; semi-annual = Jan/Jul; annual = Jan–Dec).</div>
+        </div>
+
+        <!-- Subscription toggle -->
+        <div class="mb-3">
+          <div class="form-check form-switch">
+            <input name="is_subscription" type="checkbox" class="form-check-input" id="isSubscription"
+                   role="switch"
+                   {% if form.get('is_subscription') %}checked{% endif %}
+                   onchange="document.getElementById('reminderSection').style.opacity = this.checked ? '.4' : '1'">
+            <label class="form-check-label fw-semibold" for="isSubscription">
+              <i class="bi bi-arrow-repeat me-1"></i>This is a subscription
+            </label>
+          </div>
+          <div class="form-text">When enabled, this benefit is automatically marked fully utilized every period — no manual recording or reminders needed. Uncheck if you cancel the subscription.</div>
+        </div>
+
+        <!-- Reminder schedule -->
+        <div class="mb-3" id="reminderSection"
+             style="opacity: {% if form.get('is_subscription') %}0.4{% else %}1{% endif %}">
+          <label class="form-label"><i class="bi bi-bell me-1"></i>Email Reminders</label>
+          <div class="form-text mb-2">Send a reminder email this many days before the period ends (if credit remains).</div>
+          <div class="d-flex flex-wrap gap-3">
+            {% for days in [1, 3, 7, 14, 30] %}
+              <div class="form-check">
+                <input type="checkbox" name="reminder_days" value="{{ days }}"
+                       id="rem{{ days }}" class="form-check-input"
+                       {% if existing_reminder_days is defined and days in existing_reminder_days %}checked{% endif %}>
+                <label class="form-check-label" for="rem{{ days }}">{{ days }} day{{ 's' if days != 1 }}</label>
+              </div>
+            {% endfor %}
+          </div>
+          <div class="mt-2 d-flex align-items-center gap-2" id="customReminderRow">
+            <input name="custom_reminder_day" type="number" min="1" max="365" class="form-control form-control-sm"
+                   style="width:80px;" placeholder="Other">
+            <span class="small text-muted">days before end</span>
+          </div>
+        </div>
+
+        {% if benefit %}
+        <div class="mb-3 form-check">
+          <input name="active" type="checkbox" class="form-check-input" id="activeCheck"
+                 {% if form.get('active', 1) %}checked{% endif %}>
+          <label class="form-check-label" for="activeCheck">Active</label>
+        </div>
+        {% endif %}
+
+        <div class="d-flex gap-2 mt-4">
+          <button class="btn btn-primary">Save</button>
+          <a href="{{ url_for('card_detail', id=card.id) }}" class="btn btn-outline-secondary">Cancel</a>
+          {% if benefit %}
+          <button type="button" class="btn btn-outline-danger ms-auto"
+                  data-bs-toggle="modal" data-bs-target="#deleteBenefitModal">
+            <i class="bi bi-trash me-1"></i>Delete
+          </button>
+          {% endif %}
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+{% if benefit %}
+<div class="modal fade" id="deleteBenefitModal" tabindex="-1">
+  <div class="modal-dialog modal-sm">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h6 class="modal-title text-danger">Delete Benefit</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        Delete <strong>{{ benefit.name }}</strong> and all its redemption history? This cannot be undone.
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+        <form method="post" action="{{ url_for('benefit_delete', id=benefit.id) }}">
+          <button class="btn btn-danger btn-sm">Delete</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+{% endblock %}

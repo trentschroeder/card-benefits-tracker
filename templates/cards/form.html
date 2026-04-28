@@ -1,0 +1,48 @@
+{% extends 'base.html' %}
+{% block title %}{% if form.get('id') %}Edit Card{% else %}New Card{% endif %} — Card Benefits{% endblock %}
+{% block content %}
+
+<div class="row justify-content-center">
+  <div class="col-lg-5">
+    <div class="card p-4">
+      <h4 class="mb-4">{% if form.get('id') %}Edit Card{% else %}Add Card{% endif %}</h4>
+      <form method="post">
+        <div class="mb-3">
+          <label class="form-label">Card Name <span class="text-danger">*</span></label>
+          <input name="name" type="text" class="form-control"
+                 value="{{ form.get('name', '') }}" placeholder="e.g. Chase Sapphire Reserve" required autofocus>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Last Four Digits</label>
+          <input name="last_four" type="text" maxlength="4" class="form-control"
+                 value="{{ form.get('last_four', '') }}" placeholder="1234">
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Annual Fee ($)</label>
+          <input name="annual_fee" type="number" step="0.01" min="0" class="form-control"
+                 value="{{ form.get('annual_fee', '') }}" placeholder="e.g. 695" style="max-width:160px;">
+          <div class="form-text">Used to track when the card pays for itself.</div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Owner Email</label>
+          <input name="owner_email" type="email" class="form-control"
+                 value="{{ form.get('owner_email', '') }}" placeholder="cardowner@example.com">
+          <div class="form-text">Reminder and summary emails for this card go here. Falls back to the global recipient in Settings if blank.</div>
+        </div>
+        {% if form.get('id') %}
+        <div class="mb-3 form-check">
+          <input name="active" type="checkbox" class="form-check-input" id="activeCheck"
+                 {% if form.get('active', 1) %}checked{% endif %}>
+          <label class="form-check-label" for="activeCheck">Active</label>
+        </div>
+        {% endif %}
+        <div class="d-flex gap-2">
+          <button class="btn btn-primary">Save</button>
+          <a href="{{ url_for('cards_list') }}" class="btn btn-outline-secondary">Cancel</a>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+{% endblock %}

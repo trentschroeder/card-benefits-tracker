@@ -1,0 +1,47 @@
+{% extends 'base.html' %}
+{% block title %}Redemption History — Card Benefits{% endblock %}
+{% block content %}
+
+<div class="d-flex align-items-center gap-2 mb-1">
+  <a href="{{ url_for('card_detail', id=benefit.card_id) }}" class="btn btn-outline-secondary btn-sm">
+    <i class="bi bi-arrow-left"></i>
+  </a>
+  <h3 class="mb-0">{{ benefit.name }}</h3>
+</div>
+<p class="text-muted ps-5 mb-4">{{ benefit.card_name }} &bull; Redemption History</p>
+
+{% if not redemptions %}
+  <div class="text-muted">No redemptions recorded yet.</div>
+{% else %}
+<div class="table-responsive">
+  <table class="table table-hover align-middle">
+    <thead>
+      <tr>
+        <th>Period Start</th>
+        <th>Amount</th>
+        <th>Notes</th>
+        <th>Recorded At</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in redemptions %}
+      <tr>
+        <td>{{ r.period_start }}</td>
+        <td>{% if r.amount %}${{ "%.2f"|format(r.amount) }}{% else %}<span class="text-muted">—</span>{% endif %}</td>
+        <td>{{ r.notes or '—' }}</td>
+        <td class="text-muted small">{{ r.redeemed_at }}</td>
+        <td class="text-end">
+          <form method="post" action="{{ url_for('redemption_delete', id=r.id) }}"
+                onsubmit="return confirm('Remove this redemption?')">
+            <button class="btn btn-outline-danger btn-sm"><i class="bi bi-trash"></i></button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+{% endblock %}

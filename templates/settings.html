@@ -1,0 +1,73 @@
+{% extends 'base.html' %}
+{% block title %}Settings — Card Benefits{% endblock %}
+{% block content %}
+
+<h2 class="mb-4"><i class="bi bi-gear me-2"></i>Settings</h2>
+
+<div class="row g-4">
+  <div class="col-lg-7">
+    <div class="card p-4 mb-4">
+      <h5 class="mb-3"><i class="bi bi-envelope me-2"></i>Email Reminders</h5>
+      <form method="post">
+        <div class="mb-3">
+          <label class="form-label">Gmail Address (sender)</label>
+          <input name="gmail_user" type="email" class="form-control"
+                 value="{{ cfg.gmail_user }}" placeholder="you@gmail.com">
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Gmail App Password</label>
+          <input name="gmail_password" type="password" class="form-control" placeholder="Leave blank to keep current">
+          <div class="form-text">
+            Use a <a href="https://myaccount.google.com/apppasswords" target="_blank">Gmail App Password</a>,
+            not your regular password. Requires 2-Step Verification to be enabled on your Google account.
+          </div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Daily Check Time (hour, 0–23)</label>
+          <input name="reminder_hour" type="number" min="0" max="23" class="form-control"
+                 value="{{ cfg.reminder_hour }}" style="max-width:100px;">
+          <div class="form-text">
+            Reminders are checked once per day at this hour (server local time).
+            The app must be running for scheduled emails to fire.
+          </div>
+        </div>
+        <button class="btn btn-primary">Save Settings</button>
+      </form>
+    </div>
+  </div>
+
+  <div class="col-lg-5">
+    <div class="card p-4">
+      <h5 class="mb-3"><i class="bi bi-envelope-paper me-2"></i>Send Summary Email</h5>
+      <p class="text-muted small">
+        Sends outstanding benefits to each card's owner email.
+        Leave the field below blank to use those addresses, or enter an override
+        to receive everything in one email — useful for testing.
+        Subscription benefits and fully-used credits are excluded.
+      </p>
+      <form method="post" action="{{ url_for('send_summary') }}">
+        <div class="mb-3">
+          <label class="form-label">Override recipient (optional)</label>
+          <input name="test_recipient" type="email" class="form-control"
+                 placeholder="override@example.com">
+          <div class="form-text">If set, all cards are combined into one email sent here instead of to each card's owner.</div>
+        </div>
+        <button class="btn btn-outline-primary">
+          <i class="bi bi-send me-1"></i>Send Summary Now
+        </button>
+      </form>
+    </div>
+
+    <div class="card p-4 mt-4">
+      <h5 class="mb-3"><i class="bi bi-info-circle me-2"></i>How Reminders Work</h5>
+      <ul class="small text-muted mb-0">
+        <li class="mb-1">Each benefit can have one or more reminder triggers (e.g., 7 days, 3 days, 1 day before period end).</li>
+        <li class="mb-1">An email is sent when today matches a trigger <em>and</em> the benefit still has unused credit.</li>
+        <li class="mb-1">Once the credit is fully used, no further reminders are sent for that period.</li>
+        <li>Each trigger fires at most once per period.</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+{% endblock %}

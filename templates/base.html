@@ -1,0 +1,507 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}Card Benefits{% endblock %}</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+  <style>
+    /* ── Theme variables ──────────────────────────────────────── */
+    :root, [data-theme="light"] {
+      --bg-page:        #f8f9fa;
+      --bg-card:        #ffffff;
+      --bg-input:       #ffffff;
+      --bg-table-head:  #e9ecef;
+      --bg-modal:       #ffffff;
+      --text-primary:   #212529;
+      --text-muted:     #6c757d;
+      --text-nav:       #ffffff;
+      --text-nav-hover: #ffd700;
+      --text-nav-brand: #ffffff;
+      --nav-bg:         #1a3c8a;
+      --border-color:   #dee2e6;
+      --card-shadow:    0 1px 4px rgba(0,0,0,.08);
+      --input-border:   #ced4da;
+      --footer-border:  #dee2e6;
+      --footer-color:   #6c757d;
+      --tile-hi-bg:     #fff5f5;
+      --tile-med-bg:    #fffbf2;
+      --progress-bg:    #e9ecef;
+      --toggle-active:  #1a3c8a;
+      --toggle-text:    #495057;
+      --bs-body-bg:     #f8f9fa;
+      --bs-body-color:  #212529;
+    }
+
+    [data-theme="dark"] {
+      --bg-page:        #111318;
+      --bg-card:        #1c1f26;
+      --bg-input:       #252930;
+      --bg-table-head:  #252930;
+      --bg-modal:       #1c1f26;
+      --text-primary:   #dde3ee;
+      --text-muted:     #8892a4;
+      --text-nav:       #dde3ee;
+      --text-nav-hover: #ffd700;
+      --text-nav-brand: #ffffff;
+      --nav-bg:         #0d1117;
+      --border-color:   #2e333d;
+      --card-shadow:    0 2px 8px rgba(0,0,0,.35);
+      --input-border:   #3a3f4b;
+      --footer-border:  #2e333d;
+      --footer-color:   #8892a4;
+      --tile-hi-bg:     #2a0d0d;
+      --tile-med-bg:    #231808;
+      --progress-bg:    #2e333d;
+      --toggle-active:  #4a6fa5;
+      --toggle-text:    #dde3ee;
+      --bs-body-bg:     #111318;
+      --bs-body-color:  #dde3ee;
+      --bs-tooltip-color: #dde3ee;
+      --bs-tooltip-bg:    #2a2d38;
+      --bs-emphasis-color: #dde3ee;
+      --bs-link-color:  #7eb8d4;
+    }
+
+    [data-theme="ai"] {
+      --bg-page:        #04040f;
+      --bg-card:        rgba(12, 14, 40, 0.82);
+      --bg-input:       rgba(15, 18, 50, 0.9);
+      --bg-table-head:  rgba(0, 200, 255, 0.07);
+      --bg-modal:       #0a0d28;
+      --text-primary:   #ccd8ff;
+      --text-muted:     #7088bb;
+      --text-nav:       #00e5ff;
+      --text-nav-hover: #ff00e5;
+      --text-nav-brand: #00e5ff;
+      --nav-bg:         rgba(2, 3, 18, 0.97);
+      --border-color:   rgba(0, 200, 255, 0.18);
+      --card-shadow:    0 0 18px rgba(0, 180, 255, 0.12);
+      --input-border:   rgba(0, 200, 255, 0.3);
+      --footer-border:  rgba(0, 200, 255, 0.12);
+      --footer-color:   #4a6a99;
+      --tile-hi-bg:     rgba(255, 10, 80, 0.1);
+      --tile-med-bg:    rgba(255, 120, 0, 0.08);
+      --progress-bg:    rgba(0, 200, 255, 0.1);
+      --toggle-active:  rgba(0, 200, 255, 0.2);
+      --toggle-text:    #00e5ff;
+      --bs-body-bg:     #04040f;
+      --bs-body-color:  #ccd8ff;
+      --bs-tooltip-color: #ccd8ff;
+      --bs-tooltip-bg:    #0c1040;
+      --bs-emphasis-color: #ccd8ff;
+      --bs-link-color:  #7ec8e3;
+      --bs-link-hover-color: #00e5ff;
+    }
+
+    /* ── Base overrides ───────────────────────────────────────── */
+    body {
+      background: var(--bg-page) !important;
+      color: var(--text-primary) !important;
+      transition: background .25s, color .2s;
+    }
+    .card {
+      background: var(--bg-card) !important;
+      border: 1px solid var(--border-color) !important;
+      box-shadow: var(--card-shadow) !important;
+      color: var(--text-primary) !important;
+    }
+    .text-muted { color: var(--text-muted) !important; }
+    .table {
+      color: var(--text-primary) !important;
+      border-color: var(--border-color) !important;
+    }
+    .table > thead { background: var(--bg-table-head) !important; }
+    .table td, .table th { border-color: var(--border-color) !important; }
+    .table-hover > tbody > tr:hover > * { background: color-mix(in srgb, var(--bg-card) 80%, var(--text-primary) 5%); }
+    .form-control, .form-select {
+      background: var(--bg-input) !important;
+      border-color: var(--input-border) !important;
+      color: var(--text-primary) !important;
+    }
+    .form-control:focus, .form-select:focus {
+      background: var(--bg-input) !important;
+      color: var(--text-primary) !important;
+    }
+    .form-text { color: var(--text-muted) !important; }
+    .modal-content {
+      background: var(--bg-modal) !important;
+      border-color: var(--border-color) !important;
+      color: var(--text-primary) !important;
+    }
+    .modal-header, .modal-footer { border-color: var(--border-color) !important; }
+    .progress { background: var(--progress-bg) !important; }
+    .alert-success { background: color-mix(in srgb, var(--bg-card) 70%, #198754 30%); border-color: #198754; color: var(--text-primary); }
+    .alert-danger  { background: color-mix(in srgb, var(--bg-card) 70%, #dc3545 30%); border-color: #dc3545; color: var(--text-primary); }
+    .alert-info    { background: color-mix(in srgb, var(--bg-card) 70%, #0dcaf0 30%); border-color: #0dcaf0; color: var(--text-primary); }
+    .form-check-input { background-color: var(--bg-input); border-color: var(--input-border); }
+    details > summary { color: var(--text-primary); }
+
+    /* ── Navbar ───────────────────────────────────────────────── */
+    .navbar { background: var(--nav-bg) !important; border-bottom: 1px solid var(--border-color); }
+    .navbar-brand, .navbar .nav-link { color: var(--text-nav) !important; }
+    .navbar-brand { color: var(--text-nav-brand) !important; font-weight: 700; }
+    .navbar .nav-link:hover { color: var(--text-nav-hover) !important; }
+    .navbar .nav-link.active { color: var(--text-nav-hover) !important; font-weight: 600; }
+
+    /* ── Theme toggle ─────────────────────────────────────────── */
+    .theme-toggle {
+      display: flex;
+      gap: 3px;
+      align-items: center;
+      background: rgba(255,255,255,.08);
+      border-radius: 8px;
+      padding: 3px;
+      margin-left: .75rem;
+    }
+    .theme-btn {
+      background: transparent;
+      border: none;
+      color: rgba(255,255,255,.55);
+      border-radius: 6px;
+      width: 28px;
+      height: 26px;
+      font-size: .8rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: background .15s, color .15s;
+    }
+    .theme-btn:hover { color: #fff; background: rgba(255,255,255,.15); }
+    .theme-btn.active { background: rgba(255,255,255,.22); color: #fff; }
+    [data-theme="ai"] .theme-btn.active {
+      background: rgba(0,200,255,.25);
+      color: #00e5ff;
+      box-shadow: 0 0 8px rgba(0,200,255,.4);
+    }
+
+    /* ── Footer ──────────────────────────────────────────────── */
+    footer {
+      margin-top: 4rem;
+      padding: 1rem 0;
+      color: var(--footer-color);
+      font-size: .85rem;
+      border-top: 1px solid var(--footer-border);
+    }
+
+    /* ── Misc ────────────────────────────────────────────────── */
+    .card-color-swatch { width: 20px; height: 20px; border-radius: 4px; display: inline-block; vertical-align: middle; }
+    .benefit-card { border-left: 4px solid var(--card-color, #4a90d9); }
+
+    /* ── AI theme extras ─────────────────────────────────────── */
+    [data-theme="ai"] body {
+      background:
+        radial-gradient(ellipse at 15% 40%, rgba(40, 0, 120, 0.35) 0%, transparent 55%),
+        radial-gradient(ellipse at 85% 15%, rgba(0, 60, 120, 0.35) 0%, transparent 55%),
+        radial-gradient(ellipse at 55% 85%, rgba(80, 0, 100, 0.25) 0%, transparent 50%),
+        #04040f !important;
+      background-attachment: fixed !important;
+    }
+    [data-theme="ai"] body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background-image:
+        linear-gradient(rgba(0,200,255,.04) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0,200,255,.04) 1px, transparent 1px);
+      background-size: 44px 44px;
+      pointer-events: none;
+      z-index: 0;
+    }
+    /* No z-index here — giving container-lg a z-index would create a stacking
+       context that traps position:fixed modals, causing the backdrop to cover them. */
+    [data-theme="ai"] .container-lg, [data-theme="ai"] nav { position: relative; }
+    [data-theme="ai"] .card {
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid rgba(0,200,255,.18) !important;
+    }
+    /* backdrop-filter creates a stacking context that can sit above Bootstrap's
+       modal backdrop. Strip it from all elements while any modal is open. */
+    body.modal-open .card,
+    body.modal-open [style*="backdrop-filter"] {
+      backdrop-filter: none !important;
+      -webkit-backdrop-filter: none !important;
+    }
+    [data-theme="ai"] h1,[data-theme="ai"] h2,[data-theme="ai"] h3,
+    [data-theme="ai"] h4,[data-theme="ai"] h5,[data-theme="ai"] h6 {
+      background: linear-gradient(90deg, #00e5ff, #c060ff);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    [data-theme="ai"] .navbar-brand {
+      background: linear-gradient(90deg, #00e5ff, #c060ff);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      text-shadow: none;
+    }
+    [data-theme="ai"] .badge.bg-secondary {
+      background: rgba(0,200,255,.15) !important;
+      border: 1px solid rgba(0,200,255,.35);
+      color: #00e5ff !important;
+    }
+    [data-theme="ai"] .badge.bg-success {
+      background: rgba(0,255,120,.12) !important;
+      border: 1px solid rgba(0,255,120,.4);
+      color: #00ff99 !important;
+    }
+    [data-theme="ai"] .badge.bg-danger {
+      background: rgba(255,0,80,.15) !important;
+      border: 1px solid rgba(255,0,80,.4);
+      color: #ff4477 !important;
+    }
+    [data-theme="ai"] .btn-primary {
+      background: linear-gradient(135deg, #0070cc, #9000cc) !important;
+      border: 1px solid rgba(0,200,255,.4) !important;
+      box-shadow: 0 0 12px rgba(0,120,255,.3);
+    }
+    [data-theme="ai"] .btn-primary:hover {
+      box-shadow: 0 0 20px rgba(0,180,255,.5) !important;
+    }
+    [data-theme="ai"] .btn-outline-secondary {
+      border-color: rgba(0,200,255,.35) !important;
+      color: #00e5ff !important;
+    }
+    [data-theme="ai"] .btn-outline-secondary:hover {
+      background: rgba(0,200,255,.12) !important;
+    }
+    [data-theme="ai"] .btn-outline-primary {
+      border-color: rgba(0,200,255,.4) !important;
+      color: #00e5ff !important;
+    }
+    [data-theme="ai"] .btn-outline-primary:hover {
+      background: rgba(0,200,255,.12) !important;
+    }
+    [data-theme="ai"] .btn-outline-danger {
+      border-color: rgba(255,0,80,.5) !important;
+      color: #ff4477 !important;
+    }
+    [data-theme="ai"] .progress-bar {
+      background: linear-gradient(90deg, #00c8ff, #9000ff) !important;
+    }
+    [data-theme="ai"] .progress-bar.bg-success {
+      background: linear-gradient(90deg, #00ff99, #00c8ff) !important;
+    }
+    [data-theme="ai"] .progress-bar.bg-danger {
+      background: linear-gradient(90deg, #ff0055, #ff6600) !important;
+    }
+    [data-theme="ai"] .progress-bar.bg-warning {
+      background: linear-gradient(90deg, #ff8800, #ffcc00) !important;
+    }
+    [data-theme="ai"] .text-success { color: #00ff99 !important; }
+    [data-theme="ai"] .text-danger  { color: #ff4477 !important; }
+    [data-theme="ai"] .text-warning { color: #ffaa00 !important; }
+    [data-theme="ai"] .text-primary { color: #00e5ff !important; }
+    [data-theme="ai"] .navbar {
+      border-bottom: 1px solid rgba(0,200,255,.2) !important;
+      box-shadow: 0 0 20px rgba(0,100,255,.15);
+    }
+
+    /* ── AI + dark: fixes Bootstrap components that don't inherit ── */
+
+    /* Modal × close button is a black SVG by default */
+    [data-theme="dark"] .btn-close,
+    [data-theme="ai"]   .btn-close { filter: invert(1) brightness(1.8); }
+
+    /* Table-secondary has a hardcoded Bootstrap light background */
+    [data-theme="dark"] .table-secondary > *,
+    [data-theme="dark"] .table-secondary    { --bs-table-bg: #1e2230 !important; color: var(--text-muted) !important; }
+    [data-theme="ai"]   .table-secondary > *,
+    [data-theme="ai"]   .table-secondary    { --bs-table-bg: rgba(0,200,255,.04) !important; color: var(--text-muted) !important; }
+
+    /* Select option dropdowns (Chrome/Windows renders these with system colours) */
+    [data-theme="dark"] select option { background: #1c1f26; color: #dde3ee; }
+    [data-theme="ai"]   select option { background: #0a0d28; color: #ccd8ff; }
+
+    /* Input placeholder text */
+    [data-theme="dark"] .form-control::placeholder { color: #4a5568; }
+    [data-theme="ai"]   .form-control::placeholder { color: rgba(112,136,187,.7); }
+
+    /* Form labels and check labels — Bootstrap doesn't set these explicitly,
+       but some browsers pick up a system color rather than inheriting body */
+    [data-theme="dark"] label,
+    [data-theme="dark"] .form-label,
+    [data-theme="dark"] .form-check-label { color: var(--text-primary) !important; }
+    [data-theme="ai"]   label,
+    [data-theme="ai"]   .form-label,
+    [data-theme="ai"]   .form-check-label { color: var(--text-primary) !important; }
+
+    /* Modal titles are h6 — gradient looks noisy at small size; use plain text instead */
+    [data-theme="ai"] .modal-title {
+      background: none !important;
+      -webkit-text-fill-color: #ccd8ff !important;
+      color: #ccd8ff !important;
+    }
+
+    /* Headings inside .card (settings panels, form headers) — gradient is fine for page
+       headings but overwhelming inside small card boxes */
+    [data-theme="ai"] .card h5,
+    [data-theme="ai"] .card h6 {
+      background: none !important;
+      -webkit-text-fill-color: #a0c4ff !important;
+      color: #a0c4ff !important;
+    }
+
+    /* details summary in card edit panels */
+    [data-theme="ai"] details.card summary {
+      -webkit-text-fill-color: #00e5ff;
+      color: #00e5ff;
+    }
+
+    /* Alert close buttons and text inside alerts */
+    [data-theme="ai"] .alert { color: var(--text-primary) !important; }
+
+    /* Form switch track */
+    [data-theme="ai"] .form-check-input:checked {
+      background-color: rgba(0,200,255,.5) !important;
+      border-color: #00e5ff !important;
+    }
+
+    /* Navbar toggler icon (already invert(1) inline but ensure it shows) */
+    [data-theme="ai"] .navbar-toggler { border-color: rgba(0,200,255,.3) !important; }
+
+    /* ── Tooltip colours ─────────────────────────────────────
+       Bootstrap 5.3 sets --bs-tooltip-color: var(--bs-body-bg), which
+       makes tooltip text match the page background — invisible on dark themes.
+       Override both the variable and the element directly as a fallback. */
+    [data-theme="dark"] .tooltip-inner {
+      background-color: #2a2d38 !important;
+      color: #dde3ee !important;
+    }
+    [data-theme="dark"] .tooltip .tooltip-arrow::before { border-top-color: #2a2d38 !important; }
+    [data-theme="dark"] .bs-tooltip-bottom .tooltip-arrow::before { border-top-color: transparent !important; border-bottom-color: #2a2d38 !important; }
+
+    [data-theme="ai"] .tooltip-inner {
+      background: rgba(10, 14, 52, 0.97) !important;
+      color: #ccd8ff !important;
+      border: 1px solid rgba(0,200,255,.25);
+    }
+    [data-theme="ai"] .tooltip .tooltip-arrow::before { border-top-color: rgba(10,14,52,.97) !important; }
+    [data-theme="ai"] .bs-tooltip-bottom .tooltip-arrow::before { border-top-color: transparent !important; border-bottom-color: rgba(10,14,52,.97) !important; }
+
+    /* ── Card header names and row text ──────────────────────
+       These live outside .card elements, so they rely on body cascade.
+       Explicit overrides prevent browser quirks from showing dark-on-dark. */
+    [data-theme="ai"] .card-header-row,
+    [data-theme="ai"] .card-header-row .fw-semibold { color: var(--text-primary) !important; }
+    [data-theme="ai"] .row-name  { color: var(--text-primary) !important; }
+    [data-theme="ai"] .roi-legend .roi-captured { color: var(--text-primary) !important; }
+
+    /* ── Links in page body ──────────────────────────────────
+       Bootstrap derives link colour from --bs-primary which stays blue.
+       Use a softer cyan that reads well on dark backgrounds. */
+    [data-theme="dark"] a:not(.btn):not(.nav-link):not(.navbar-brand):not(.badge) { color: #7eb8d4; }
+    [data-theme="dark"] a:not(.btn):not(.nav-link):not(.navbar-brand):not(.badge):hover { color: #aad4e8; }
+    [data-theme="ai"]   a:not(.btn):not(.nav-link):not(.navbar-brand):not(.badge) { color: #7ec8e3; }
+    [data-theme="ai"]   a:not(.btn):not(.nav-link):not(.navbar-brand):not(.badge):hover { color: #00e5ff; }
+
+    @keyframes aiPulse {
+      0%, 100% { box-shadow: 0 0 10px rgba(255,0,80,.25), var(--card-shadow); }
+      50%       { box-shadow: 0 0 22px rgba(255,0,80,.45), var(--card-shadow); }
+    }
+    @keyframes aiPulseMed {
+      0%, 100% { box-shadow: 0 0 10px rgba(255,120,0,.2), var(--card-shadow); }
+      50%       { box-shadow: 0 0 20px rgba(255,120,0,.4), var(--card-shadow); }
+    }
+  </style>
+  <!-- Apply saved theme before paint to prevent flash -->
+  <script>
+    (function() {
+      var t = localStorage.getItem('cb-theme') || 'light';
+      document.documentElement.setAttribute('data-theme', t);
+    })();
+  </script>
+  {% block head %}{% endblock %}
+</head>
+<body>
+<nav class="navbar navbar-expand-lg mb-4">
+  <div class="container-lg">
+    <a class="navbar-brand fw-bold" href="{{ url_for('dashboard') }}">
+      <i class="bi bi-credit-card-2-front-fill me-1"></i> Card Benefits
+    </a>
+    <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navMenu">
+      <span class="navbar-toggler-icon" style="filter:invert(1)"></span>
+    </button>
+    <div class="collapse navbar-collapse" id="navMenu">
+      <ul class="navbar-nav ms-auto align-items-center">
+        <li class="nav-item">
+          <a class="nav-link {% if request.path == '/' %}active{% endif %}"
+             href="{{ url_for('dashboard') }}">
+            <i class="bi bi-speedometer2 me-1"></i>Dashboard
+          </a>
+        </li>
+        <li class="nav-item">
+          <a class="nav-link {% if request.path.startswith('/cards') %}active{% endif %}"
+             href="{{ url_for('cards_list') }}">
+            <i class="bi bi-credit-card me-1"></i>Cards
+          </a>
+        </li>
+        <li class="nav-item">
+          <a class="nav-link {% if request.path == '/settings' %}active{% endif %}"
+             href="{{ url_for('settings') }}">
+            <i class="bi bi-gear me-1"></i>Settings
+          </a>
+        </li>
+        {% if session.get('logged_in') %}
+        <li class="nav-item">
+          <a class="nav-link" href="{{ url_for('logout') }}">
+            <i class="bi bi-box-arrow-right me-1"></i>Logout
+          </a>
+        </li>
+        {% endif %}
+        <li class="nav-item ms-1">
+          <div class="theme-toggle">
+            <button class="theme-btn" id="btn-light" onclick="setTheme('light')" title="Light">
+              <i class="bi bi-sun-fill"></i>
+            </button>
+            <button class="theme-btn" id="btn-dark" onclick="setTheme('dark')" title="Dark">
+              <i class="bi bi-moon-fill"></i>
+            </button>
+            <button class="theme-btn" id="btn-ai" onclick="setTheme('ai')" title="AI Mode">
+              <i class="bi bi-stars"></i>
+            </button>
+          </div>
+        </li>
+      </ul>
+    </div>
+  </div>
+</nav>
+
+<div class="container-lg">
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% for category, message in messages %}
+      <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+        {{ message }}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+      </div>
+    {% endfor %}
+  {% endwith %}
+
+  {% block content %}{% endblock %}
+</div>
+
+<footer class="text-center">Card Benefits &mdash; local</footer>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+  function setTheme(t) {
+    document.documentElement.setAttribute('data-theme', t);
+    localStorage.setItem('cb-theme', t);
+    document.querySelectorAll('.theme-btn').forEach(b => b.classList.remove('active'));
+    var btn = document.getElementById('btn-' + t);
+    if (btn) btn.classList.add('active');
+  }
+  // Mark active button on load
+  (function() {
+    var t = localStorage.getItem('cb-theme') || 'light';
+    var btn = document.getElementById('btn-' + t);
+    if (btn) btn.classList.add('active');
+  })();
+</script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

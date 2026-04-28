@@ -1,0 +1,167 @@
+{% extends 'base.html' %}
+{% block title %}{{ card.name }} — Card Benefits{% endblock %}
+{% block content %}
+
+<div class="d-flex align-items-center gap-2 mb-4">
+  <h2 class="mb-0">
+    {{ card.name }}
+    {% if card.last_four %}<span class="text-muted fw-normal fs-5">&nbsp;…{{ card.last_four }}</span>{% endif %}
+  </h2>
+  {% if not card.active %}<span class="badge bg-secondary">Inactive</span>{% endif %}
+</div>
+
+<!-- Edit card -->
+<details class="card p-3 mb-4">
+  <summary class="fw-semibold" style="cursor:pointer;list-style:none;">
+    <i class="bi bi-pencil me-1"></i>Edit Card Details
+  </summary>
+  <form method="post" class="mt-3">
+    <div class="row g-3">
+      <div class="col-sm-8">
+        <label class="form-label">Card Name</label>
+        <input name="name" type="text" class="form-control" value="{{ card.name }}" required>
+      </div>
+      <div class="col-sm-4">
+        <label class="form-label">Last Four</label>
+        <input name="last_four" type="text" maxlength="4" class="form-control"
+               value="{{ card.last_four or '' }}">
+      </div>
+      <div class="col-sm-4">
+        <label class="form-label">Annual Fee ($)</label>
+        <input name="annual_fee" type="number" step="0.01" min="0" class="form-control"
+               value="{{ card.annual_fee or '' }}" placeholder="e.g. 695">
+      </div>
+      <div class="col-sm-8">
+        <label class="form-label">Owner Email</label>
+        <input name="owner_email" type="email" class="form-control"
+               value="{{ card.owner_email or '' }}" placeholder="cardowner@example.com">
+        <div class="form-text">Reminders for this card go here (falls back to global recipient if blank).</div>
+      </div>
+      <div class="col-12 form-check ms-1">
+        <input name="active" type="checkbox" class="form-check-input" id="activeCheck"
+               {% if card.active %}checked{% endif %}>
+        <label class="form-check-label" for="activeCheck">Active</label>
+      </div>
+    </div>
+    <div class="d-flex gap-2 mt-3">
+      <button class="btn btn-primary btn-sm">Save Changes</button>
+      <button type="button" class="btn btn-outline-danger btn-sm ms-auto"
+              data-bs-toggle="modal" data-bs-target="#deleteCardModal">
+        <i class="bi bi-trash me-1"></i>Delete Card
+      </button>
+    </div>
+  </form>
+</details>
+
+<!-- Benefits list -->
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h4 class="mb-0">Benefits</h4>
+  <a href="{{ url_for('benefit_new', card_id=card.id) }}" class="btn btn-primary btn-sm">
+    <i class="bi bi-plus-lg me-1"></i>Add Benefit
+  </a>
+</div>
+
+{% if not benefits %}
+  <div class="text-muted">No benefits yet. <a href="{{ url_for('benefit_new', card_id=card.id) }}">Add one</a>.</div>
+{% else %}
+<div class="table-responsive">
+  <table class="table table-hover align-middle">
+    <thead>
+      <tr>
+        <th>Benefit</th>
+        <th>Period</th>
+        <th>Credit</th>
+        <th>This Period</th>
+        <th>Period Ends</th>
+        <th>Days Left</th>
+        <th>Reminders</th>
+        <th>Status</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for b in benefits %}
+      <tr class="{% if not b.active %}table-secondary{% endif %}">
+        <td>
+          <div class="fw-semibold">
+            {{ b.name }}
+            {% if b.is_subscription %}<i class="bi bi-arrow-repeat text-success ms-1" title="Subscription"></i>{% endif %}
+          </div>
+          {% if b.description %}<div class="text-muted small">{{ b.description }}</div>{% endif %}
+        </td>
+        <td><span class="badge bg-secondary">{{ b.period_label }}</span></td>
+        <td>{% if b.credit_amount %}${{ "%.2f"|format(b.credit_amount) }}{% else %}<span class="text-muted">—</span>{% endif %}</td>
+        <td>
+          {% if b.is_subscription %}
+            <span class="text-success"><i class="bi bi-arrow-repeat me-1"></i>Auto</span>
+          {% elif b.credit_amount %}
+            ${{ "%.2f"|format(b.amount_used) }} / ${{ "%.2f"|format(b.credit_amount) }}
+          {% elif b.fully_used %}
+            <span class="text-success">Used</span>
+          {% else %}
+            <span class="text-muted">Not used</span>
+          {% endif %}
+        </td>
+        <td>{{ b.period_end.strftime('%b %d, %Y') }}</td>
+        <td>
+          {% if b.days_left <= 3 %}
+            <span class="text-danger fw-semibold">{{ b.days_left }}d</span>
+          {% elif b.days_left <= 7 %}
+            <span class="text-warning fw-semibold">{{ b.days_left }}d</span>
+          {% else %}
+            {{ b.days_left }}d
+          {% endif %}
+        </td>
+        <td class="small text-muted">
+          {% if b.is_subscription %}—{% elif b.reminder_days %}{{ b.reminder_days | join(', ') }}d{% else %}—{% endif %}
+        </td>
+        <td>
+          {% if b.is_subscription %}
+            <span class="badge bg-success"><i class="bi bi-arrow-repeat me-1"></i>Auto</span>
+          {% elif b.fully_used %}
+            <span class="badge bg-success">Done</span>
+          {% elif not b.active %}
+            <span class="badge bg-secondary">Inactive</span>
+          {% else %}
+            <span class="badge bg-danger">Pending</span>
+          {% endif %}
+        </td>
+        <td class="text-end">
+          <div class="d-flex gap-1 justify-content-end">
+            <a href="{{ url_for('benefit_redemptions', id=b.id) }}" class="btn btn-outline-secondary btn-sm" title="History">
+              <i class="bi bi-clock-history"></i>
+            </a>
+            <a href="{{ url_for('benefit_edit', id=b.id) }}" class="btn btn-outline-secondary btn-sm" title="Edit">
+              <i class="bi bi-pencil"></i>
+            </a>
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+<!-- Delete card modal -->
+<div class="modal fade" id="deleteCardModal" tabindex="-1">
+  <div class="modal-dialog modal-sm">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h6 class="modal-title text-danger">Delete Card</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        Delete <strong>{{ card.name }}</strong> and all its benefits and redemption history? This cannot be undone.
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+        <form method="post" action="{{ url_for('card_delete', id=card.id) }}">
+          <button class="btn btn-danger btn-sm">Delete</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}

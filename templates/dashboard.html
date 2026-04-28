@@ -1,0 +1,472 @@
+{% extends 'base.html' %}
+{% block title %}Dashboard — Card Benefits{% endblock %}
+
+{% block head %}
+<style>
+  /* ── Benefit rows ──────────────────────────────────────── */
+  .benefit-list {
+    border-radius: 8px;
+    overflow: hidden;
+    border: 1px solid var(--border-color);
+    box-shadow: var(--card-shadow);
+  }
+  .benefit-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 14px;
+    background: var(--bg-card);
+    border-bottom: 1px solid var(--border-color);
+    transition: background .12s;
+  }
+  .benefit-row:last-child { border-bottom: none; }
+  .benefit-row:hover { background: color-mix(in srgb, var(--bg-card) 92%, var(--text-primary) 8%); }
+  .benefit-row.row-urgent-high { background: var(--tile-hi-bg); }
+  .benefit-row.row-urgent-med  { background: var(--tile-med-bg); }
+
+  .row-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .row-name {
+    flex: 1 1 0;
+    min-width: 0;
+    font-size: .85rem;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .row-period {
+    font-size: .7rem;
+    color: var(--text-muted);
+    white-space: nowrap;
+    flex-shrink: 0;
+    width: 80px;
+    text-align: right;
+  }
+  .row-bar-wrap {
+    flex-shrink: 0;
+    width: 72px;
+  }
+  .row-bar-wrap .progress { height: 5px; }
+  .row-amount {
+    font-size: .72rem;
+    color: var(--text-muted);
+    text-align: right;
+    white-space: nowrap;
+    flex-shrink: 0;
+    width: 72px;
+  }
+  .row-amount.remaining { color: var(--text-primary); font-weight: 600; }
+
+  .days-badge {
+    display: inline-block;
+    font-size: .65rem;
+    font-weight: 700;
+    padding: 2px 6px;
+    border-radius: 4px;
+    white-space: nowrap;
+    flex-shrink: 0;
+    min-width: 38px;
+    text-align: center;
+  }
+  .days-badge-high { background: #dc3545; color: #fff; }
+  .days-badge-med  { background: #e67e22; color: #fff; }
+  .days-badge-low  { background: var(--bg-table-head); color: var(--text-muted); }
+  .days-badge-done { background: #d1e7dd; color: #0a3622; }
+  [data-theme="dark"] .days-badge-done { background: #0d2b1e; color: #5cb88a; }
+  [data-theme="ai"]   .days-badge-done { background: rgba(0,255,120,.12); color: #00ff99; border: 1px solid rgba(0,255,120,.3); }
+  [data-theme="ai"]   .days-badge-high { box-shadow: 0 0 6px rgba(255,0,80,.5); }
+  [data-theme="ai"]   .days-badge-med  { box-shadow: 0 0 6px rgba(255,120,0,.4); }
+
+  .row-action {
+    flex-shrink: 0;
+    width: 28px;
+    text-align: center;
+  }
+  .btn-add {
+    width: 26px; height: 26px;
+    border-radius: 6px;
+    border: 1px solid var(--border-color);
+    background: transparent;
+    color: var(--text-muted);
+    font-size: .9rem;
+    line-height: 1;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer;
+    transition: all .12s;
+    padding: 0;
+  }
+  .btn-add:hover { border-color: #0d6efd; color: #0d6efd; background: rgba(13,110,253,.07); }
+  [data-theme="ai"] .btn-add:hover { border-color: #00e5ff; color: #00e5ff; background: rgba(0,200,255,.1); }
+
+  .row-info-icon {
+    color: var(--border-color);
+    font-size: .7rem;
+    cursor: default;
+    flex-shrink: 0;
+  }
+  .row-info-icon:hover { color: var(--text-muted); }
+
+  /* ── Done/auto footer row ──────────────────────────────── */
+  .done-footer {
+    background: var(--bg-card);
+    padding: 6px 14px;
+    border-top: 1px solid var(--border-color);
+    font-size: .75rem;
+    color: var(--text-muted);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    user-select: none;
+    border-radius: 0 0 8px 8px;
+  }
+  .done-footer:hover { color: var(--text-primary); }
+  .done-section { border-top: 1px dashed var(--border-color); }
+  .done-row { opacity: .5; }
+  .done-row:hover { opacity: .75; }
+
+  /* ── Card header ───────────────────────────────────────── */
+  .card-header-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+  }
+
+  /* ── AI pulsing ────────────────────────────────────────── */
+  @keyframes dotPulse {
+    0%,100% { box-shadow: 0 0 0 0 rgba(220,53,69,.6); }
+    50%      { box-shadow: 0 0 0 4px rgba(220,53,69,0); }
+  }
+  [data-theme="ai"] .row-dot.dot-high { animation: dotPulse 2s ease-in-out infinite; }
+
+  /* ── ROI merged bar ────────────────────────────────────── */
+  .roi-wrap { margin-bottom: 6px; }
+  .roi-bar-outer { position: relative; margin-bottom: 3px; }
+  .roi-progress { height: 8px !important; border-radius: 4px; }
+  .roi-fee-tick {
+    position: absolute;
+    top: -1px;
+    width: 2px;
+    height: 10px;
+    background: var(--text-muted);
+    border-radius: 1px;
+    transform: translateX(-50%);
+    opacity: .7;
+  }
+  .roi-legend {
+    display: flex;
+    gap: 8px;
+    font-size: .68rem;
+    color: var(--text-muted);
+    flex-wrap: wrap;
+  }
+  .roi-legend .roi-captured { font-weight: 700; color: var(--text-primary); }
+  [data-theme="ai"] .roi-fee-tick { background: #7090c0; }
+
+  /* ── Collapse button ────────────────────────────────────── */
+  .btn-collapse {
+    width: 22px; height: 22px;
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-size: .75rem;
+    flex-shrink: 0;
+  }
+  .btn-collapse:hover { color: var(--text-primary); }
+  .btn-collapse i { transition: transform .2s; }
+
+  /* ── Hide on small screens ─────────────────────────────── */
+  @media (max-width: 575px) {
+    .row-period, .row-bar-wrap { display: none; }
+    .row-amount { width: auto; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h2 class="mb-0"><i class="bi bi-speedometer2 me-2"></i>Dashboard</h2>
+  <a href="{{ url_for('card_new') }}" class="btn btn-primary btn-sm">
+    <i class="bi bi-plus-lg me-1"></i>Add Card
+  </a>
+</div>
+
+{% if dashboard_cards %}
+<div class="card mb-4 py-2 px-3">
+  <div class="row text-center g-0">
+    <div class="col-4 border-end">
+      <div class="fs-4 fw-bold text-primary">${{ total_captured | int }}</div>
+      <div class="text-muted" style="font-size:.73rem;">Captured YTD</div>
+    </div>
+    <div class="col-4 border-end">
+      <div class="fs-4 fw-bold">${{ total_fees | int }}</div>
+      <div class="text-muted" style="font-size:.73rem;">Annual Fees</div>
+    </div>
+    <div class="col-4">
+      <div class="fs-4 fw-bold {% if due_in_30 > 0 %}text-warning{% else %}text-success{% endif %}">{{ due_in_30 }}</div>
+      <div class="text-muted" style="font-size:.73rem;">Due in 30 Days</div>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+{% if not dashboard_cards %}
+<div class="text-center py-5 text-muted">
+  <i class="bi bi-credit-card display-4 mb-3 d-block"></i>
+  No cards yet. <a href="{{ url_for('card_new') }}">Add your first card</a> to get started.
+</div>
+{% endif %}
+
+{% for dc in dashboard_cards %}
+{% set card = dc.card %}
+{% set roi  = dc.roi %}
+{% set pending = dc.benefits | selectattr('fully_used', 'false') | list %}
+{% set done    = dc.benefits | selectattr('fully_used') | list %}
+
+<div class="mb-4">
+  <!-- Card header -->
+  <div class="card-header-row">
+    <button class="btn-collapse" onclick="toggleCard({{ card.id }})" title="Expand / collapse">
+      <i class="bi bi-chevron-down" id="collapse-chevron-{{ card.id }}"></i>
+    </button>
+    <span class="fw-semibold" style="font-size:.95rem;">
+      {{ card.name }}
+      {% if card.last_four %}<span class="text-muted fw-normal">&thinsp;…{{ card.last_four }}</span>{% endif %}
+    </span>
+    <a href="{{ url_for('card_detail', id=card.id) }}"
+       class="btn btn-outline-secondary ms-auto py-0 px-2" style="font-size:.72rem;">
+      <i class="bi bi-pencil"></i>
+    </a>
+  </div>
+
+  <div id="card-body-{{ card.id }}">
+
+  <!-- ROI merged bar -->
+  {% if roi.max_possible > 0 %}
+  {% if card.annual_fee and roi.fee_pct is not none %}
+    {% set bar_color = 'bg-success' if roi.fee_pct >= 100 else ('bg-warning' if roi.fee_pct >= 50 else 'bg-danger') %}
+  {% else %}
+    {% set bar_color = 'bg-primary' %}
+  {% endif %}
+  <div class="roi-wrap">
+    <div class="roi-bar-outer">
+      <div class="progress roi-progress">
+        <div class="progress-bar {{ bar_color }}" style="width:{{ roi.max_pct }}%"></div>
+      </div>
+      {% if roi.fee_tick_pct %}
+      <div class="roi-fee-tick" style="left:{{ roi.fee_tick_pct }}%;"></div>
+      {% endif %}
+    </div>
+    <div class="roi-legend">
+      <span class="roi-captured">${{ roi.captured | int }} captured</span>
+      {% if card.annual_fee %}<span>· ${{ card.annual_fee | int }} fee</span>{% endif %}
+      <span>· ${{ roi.max_possible | int }} max</span>
+    </div>
+  </div>
+  {% endif %}
+
+  {% if not dc.benefits %}
+    <div class="text-muted small ps-3">No active benefits. <a href="{{ url_for('benefit_new', card_id=card.id) }}">Add one</a>.</div>
+  {% else %}
+
+  <div class="benefit-list">
+
+    <!-- Pending benefits -->
+    {% if not pending %}
+      <div class="benefit-row text-muted" style="font-size:.82rem; justify-content:center;">
+        <i class="bi bi-check-all me-2 text-success"></i>All benefits handled this period
+      </div>
+    {% endif %}
+
+    {% for b in pending %}
+      {% if b.days_left <= 3 %}
+        {% set dot_color = '#dc3545' %} {% set row_class = 'row-urgent-high' %}
+        {% set badge_class = 'days-badge-high' %} {% set badge_label = b.days_left ~ 'd left' %}
+        {% set bar_class = 'bg-danger' %} {% set dot_class = 'dot-high' %}
+      {% elif b.days_left <= 7 %}
+        {% set dot_color = '#e67e22' %} {% set row_class = 'row-urgent-med' %}
+        {% set badge_class = 'days-badge-med' %} {% set badge_label = b.days_left ~ 'd left' %}
+        {% set bar_class = 'bg-warning' %} {% set dot_class = '' %}
+      {% else %}
+        {% set dot_color = '#adb5bd' %} {% set row_class = '' %}
+        {% set badge_class = 'days-badge-low' %} {% set badge_label = b.days_left ~ 'd' %}
+        {% set bar_class = 'bg-primary' %} {% set dot_class = '' %}
+      {% endif %}
+
+      <div class="benefit-row {{ row_class }}">
+        <span class="row-dot {{ dot_class }}" style="background:{{ dot_color }};"></span>
+
+        <span class="row-name">
+          {{ b.name }}
+          {% if b.description %}
+            <i class="bi bi-info-circle row-info-icon ms-1"
+               data-bs-toggle="tooltip" title="{{ b.description }}"></i>
+          {% endif %}
+        </span>
+
+        <span class="row-period">{{ b.period_label }}</span>
+
+        {% if b.credit_amount %}
+          <div class="row-bar-wrap">
+            <div class="progress">
+              <div class="progress-bar {{ bar_class }}" style="width:{{ b.pct_used }}%"></div>
+            </div>
+          </div>
+          <span class="row-amount remaining">
+            ${{ "%.0f"|format(b.remaining) }} left
+          </span>
+        {% else %}
+          <div class="row-bar-wrap"></div>
+          <span class="row-amount text-danger" style="width:72px;">not used</span>
+        {% endif %}
+
+        <span class="days-badge {{ badge_class }}">{{ badge_label }}</span>
+
+        <div class="row-action">
+          <button class="btn-add"
+                  data-bs-toggle="modal"
+                  data-bs-target="#redeemModal{{ b.id }}"
+                  title="Record usage">
+            <i class="bi bi-plus"></i>
+          </button>
+        </div>
+      </div>
+    {% endfor %}
+
+    <!-- Done / subscription benefits (collapsed) -->
+    {% if done %}
+    <div class="done-footer" onclick="toggleDone('done-{{ card.id }}')" id="done-toggle-{{ card.id }}">
+      <i class="bi bi-chevron-right" id="done-chevron-{{ card.id }}" style="font-size:.65rem; transition:transform .2s;"></i>
+      {% set n_auto = done | selectattr('is_subscription') | list | length %}
+      {% set n_done = done | length - n_auto %}
+      {% if n_done > 0 %}<span><i class="bi bi-check-circle-fill text-success me-1"></i>{{ n_done }} done</span>{% endif %}
+      {% if n_auto > 0 %}<span><i class="bi bi-arrow-repeat text-success me-1"></i>{{ n_auto }} auto</span>{% endif %}
+    </div>
+    <div class="done-section" id="done-{{ card.id }}" style="display:none;">
+      {% for b in done %}
+        {% set badge_label = 'Auto' if b.is_subscription else 'Done' %}
+        <div class="benefit-row done-row">
+          <span class="row-dot" style="background:#198754;"></span>
+          <span class="row-name text-muted fw-normal">{{ b.name }}</span>
+          <span class="row-period">{{ b.period_label }}</span>
+          {% if b.credit_amount %}
+            <div class="row-bar-wrap">
+              <div class="progress"><div class="progress-bar bg-success" style="width:100%"></div></div>
+            </div>
+            <span class="row-amount" style="color:#198754;">
+              {% if b.is_subscription %}<i class="bi bi-arrow-repeat me-1"></i>{% endif %}
+              ${{ "%.0f"|format(b.credit_amount) }}
+            </span>
+          {% else %}
+            <div class="row-bar-wrap"></div>
+            <span class="row-amount" style="color:#198754;">
+              {% if b.is_subscription %}<i class="bi bi-arrow-repeat me-1"></i>{% endif %}used
+            </span>
+          {% endif %}
+          <span class="days-badge days-badge-done">{{ badge_label }}</span>
+          <div class="row-action"></div>
+        </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+  </div>
+  {% endif %}
+
+  </div>{# /card-body #}
+</div>
+
+<!-- Redeem modals for this card -->
+{% for b in pending %}
+<div class="modal fade" id="redeemModal{{ b.id }}" tabindex="-1">
+  <div class="modal-dialog modal-sm">
+    <div class="modal-content">
+      <div class="modal-header py-2">
+        <div>
+          <div class="fw-semibold">{{ b.name }}</div>
+          <div class="text-muted" style="font-size:.75rem;">{{ card.name }}</div>
+        </div>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <form method="post" action="{{ url_for('benefit_redeem', id=b.id) }}">
+        <div class="modal-body">
+          {% if b.credit_amount %}
+          <div class="mb-3">
+            <label class="form-label">Amount Used ($)</label>
+            <input name="amount" type="number" step="0.01" min="0.01"
+                   max="{{ b.remaining }}" class="form-control"
+                   placeholder="e.g. {{ '%.2f'|format(b.remaining) }}" autofocus>
+            <div class="form-text">${{ "%.2f"|format(b.remaining) }} of ${{ "%.2f"|format(b.credit_amount) }} remaining</div>
+          </div>
+          {% endif %}
+          <div class="mb-3">
+            <label class="form-label">Notes (optional)</label>
+            <input name="notes" type="text" class="form-control" placeholder="e.g. Dining at Nobu">
+          </div>
+          <div>
+            <label class="form-label">Date</label>
+            <input name="redemption_date" type="date" class="form-control"
+                   value="{{ today().isoformat() }}" style="max-width:160px;">
+            <div class="form-text">Change to record a past redemption.</div>
+          </div>
+        </div>
+        <div class="modal-footer py-2">
+          <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+          <button class="btn btn-primary btn-sm">Save</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endfor %}
+
+{% endfor %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+  document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => {
+    new bootstrap.Tooltip(el, { trigger: 'hover focus' });
+  });
+
+  function toggleDone(id) {
+    var el  = document.getElementById(id);
+    var cid = id.replace('done-', '');
+    var ch  = document.getElementById('done-chevron-' + cid);
+    var open = el.style.display === 'none';
+    el.style.display = open ? 'block' : 'none';
+    if (ch) ch.style.transform = open ? 'rotate(90deg)' : '';
+  }
+
+  function toggleCard(id) {
+    var body    = document.getElementById('card-body-' + id);
+    var chevron = document.getElementById('collapse-chevron-' + id);
+    var isHidden = body.style.display === 'none';
+    body.style.display = isHidden ? '' : 'none';
+    if (chevron) chevron.style.transform = isHidden ? '' : 'rotate(-90deg)';
+    if (isHidden) localStorage.removeItem('cb-card-collapsed-' + id);
+    else          localStorage.setItem('cb-card-collapsed-' + id, '1');
+  }
+
+  // Restore collapsed state on page load
+  document.addEventListener('DOMContentLoaded', function () {
+    document.querySelectorAll('[id^="card-body-"]').forEach(function (body) {
+      var id = body.id.replace('card-body-', '');
+      if (localStorage.getItem('cb-card-collapsed-' + id)) {
+        body.style.display = 'none';
+        var ch = document.getElementById('collapse-chevron-' + id);
+        if (ch) ch.style.transform = 'rotate(-90deg)';
+      }
+    });
+  });
+</script>
+{% endblock %}
