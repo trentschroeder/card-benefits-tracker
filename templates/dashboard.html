@@ -83,11 +83,8 @@
 
   .row-action {
     flex-shrink: 0;
-    width: 60px;
-    display: flex;
-    align-items: center;
-    justify-content: flex-end;
-    gap: 4px;
+    width: 28px;
+    text-align: center;
   }
   .btn-add {
     width: 26px; height: 26px;
@@ -305,13 +302,14 @@
       <div class="benefit-row {{ row_class }}">
         <span class="row-dot {{ dot_class }}" style="background:{{ dot_color }};"></span>
 
-        <span class="row-name">
+        <a href="{{ url_for('benefit_redemptions', id=b.id) }}" class="row-name"
+           style="text-decoration:none; color:inherit;">
           {{ b.name }}
           {% if b.description %}
             <i class="bi bi-info-circle row-info-icon ms-1"
                data-bs-toggle="tooltip" title="{{ b.description }}"></i>
           {% endif %}
-        </span>
+        </a>
 
         <span class="row-period">{{ b.period_label }}</span>
 
@@ -332,9 +330,6 @@
         <span class="days-badge {{ badge_class }}">{{ badge_label }}</span>
 
         <div class="row-action">
-          <a href="{{ url_for('benefit_redemptions', id=b.id) }}" class="btn-add" title="View history">
-            <i class="bi bi-clock-history"></i>
-          </a>
           <button class="btn-add"
                   data-bs-toggle="modal"
                   data-bs-target="#redeemModal{{ b.id }}"
@@ -359,7 +354,8 @@
         {% set badge_label = 'Auto' if b.is_subscription else 'Done' %}
         <div class="benefit-row done-row">
           <span class="row-dot" style="background:#198754;"></span>
-          <span class="row-name text-muted fw-normal">{{ b.name }}</span>
+          <a href="{{ url_for('benefit_redemptions', id=b.id) }}" class="row-name text-muted fw-normal"
+             style="text-decoration:none; color:inherit;">{{ b.name }}</a>
           <span class="row-period">{{ b.period_label }}</span>
           {% if b.credit_amount %}
             <div class="row-bar-wrap">
@@ -376,11 +372,7 @@
             </span>
           {% endif %}
           <span class="days-badge days-badge-done">{{ badge_label }}</span>
-          <div class="row-action">
-            <a href="{{ url_for('benefit_redemptions', id=b.id) }}" class="btn-add" title="View history">
-              <i class="bi bi-clock-history"></i>
-            </a>
-          </div>
+          <div class="row-action"></div>
         </div>
       {% endfor %}
     </div>

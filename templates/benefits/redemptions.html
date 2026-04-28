@@ -1,16 +1,56 @@
 {% extends 'base.html' %}
-{% block title %}Redemption History — Card Benefits{% endblock %}
+{% block title %}{{ benefit.name }} — Card Benefits{% endblock %}
 {% block content %}
 
-<div class="d-flex align-items-center gap-2 mb-1">
-  <a href="{{ url_for('card_detail', id=benefit.card_id) }}" class="btn btn-outline-secondary btn-sm">
+<div class="d-flex align-items-center gap-2 mb-3">
+  <a href="{{ url_for('dashboard') }}" class="btn btn-outline-secondary btn-sm">
     <i class="bi bi-arrow-left"></i>
   </a>
-  <h3 class="mb-0">{{ benefit.name }}</h3>
+  <div>
+    <h3 class="mb-0">{{ benefit.name }}</h3>
+    <div class="text-muted" style="font-size:.85rem;">{{ benefit.card_name }}</div>
+  </div>
 </div>
-<p class="text-muted ps-5 mb-4">{{ benefit.card_name }} &bull; {{ benefit.period_label }}</p>
+
+<!-- Benefit info strip -->
+<div class="card p-3 mb-4">
+  <div class="row g-3 align-items-center">
+    {% if benefit.description %}
+    <div class="col-12 col-sm">
+      <div class="text-muted" style="font-size:.8rem; text-transform:uppercase; letter-spacing:.05em;">Description</div>
+      <div style="font-size:.9rem;">{{ benefit.description }}</div>
+    </div>
+    {% endif %}
+    <div class="col-auto">
+      <div class="text-muted" style="font-size:.8rem; text-transform:uppercase; letter-spacing:.05em;">Recurrence</div>
+      <span class="badge bg-secondary">{{ benefit.period_label }}</span>
+      {% if benefit.is_subscription %}<span class="badge bg-success ms-1"><i class="bi bi-arrow-repeat me-1"></i>Subscription</span>{% endif %}
+    </div>
+    {% if benefit.credit_amount %}
+    <div class="col-auto">
+      <div class="text-muted" style="font-size:.8rem; text-transform:uppercase; letter-spacing:.05em;">Per Period</div>
+      <div class="fw-semibold">${{ "%.2f"|format(benefit.credit_amount) }}</div>
+    </div>
+    <div class="col-auto">
+      <div class="text-muted" style="font-size:.8rem; text-transform:uppercase; letter-spacing:.05em;">This Period</div>
+      {% if benefit.fully_used %}
+        <span class="text-success fw-semibold"><i class="bi bi-check-circle me-1"></i>Complete</span>
+      {% else %}
+        <div class="fw-semibold">${{ "%.2f"|format(benefit.remaining) }} left</div>
+      {% endif %}
+    </div>
+    {% endif %}
+    <div class="col-auto">
+      <div class="text-muted" style="font-size:.8rem; text-transform:uppercase; letter-spacing:.05em;">Period Ends</div>
+      <div style="font-size:.9rem;">{{ benefit.period_end.strftime('%b %d, %Y') }}
+        <span class="text-muted">({{ benefit.days_left }}d)</span>
+      </div>
+    </div>
+  </div>
+</div>
 
 <!-- Record new redemption -->
+{% if not benefit.is_subscription %}
 <div class="card p-3 mb-4">
   <h6 class="mb-3">Record Redemption</h6>
   <form method="post" action="{{ url_for('benefit_redeem', id=benefit.id) }}" class="row g-2 align-items-end">
@@ -40,7 +80,10 @@
     </div>
   </form>
 </div>
+{% endif %}
 
+<!-- History -->
+<h5 class="mb-3">History</h5>
 {% if not redemptions %}
   <div class="text-muted">No redemptions recorded yet.</div>
 {% else %}
