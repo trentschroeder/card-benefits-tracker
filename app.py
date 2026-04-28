@@ -641,7 +641,7 @@ def benefit_redemptions(id):
     db.close()
     return render_template('benefits/redemptions.html', benefit=enriched,
                            period_history=period_history, period_states=period_states,
-                           redemptions_by_period=dict(redemptions_by_period),
+                           redemptions=list(all_redemptions),
                            older_periods=older_periods, has_older=has_older, show_all=show_all)
 
 
