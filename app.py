@@ -567,12 +567,13 @@ def benefit_redemptions(id):
         db.close()
         flash('Benefit not found.', 'danger')
         return redirect(url_for('dashboard'))
+    enriched = enrich_benefit(db, b)
     redemptions = db.execute(
         'SELECT * FROM redemptions WHERE benefit_id = ? ORDER BY redeemed_at DESC',
         (id,)
     ).fetchall()
     db.close()
-    return render_template('benefits/redemptions.html', benefit=b, redemptions=redemptions)
+    return render_template('benefits/redemptions.html', benefit=enriched, redemptions=redemptions)
 
 
 # ── Settings ───────────────────────────────────────────────────────────────────

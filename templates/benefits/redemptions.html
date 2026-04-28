@@ -8,7 +8,38 @@
   </a>
   <h3 class="mb-0">{{ benefit.name }}</h3>
 </div>
-<p class="text-muted ps-5 mb-4">{{ benefit.card_name }} &bull; Redemption History</p>
+<p class="text-muted ps-5 mb-4">{{ benefit.card_name }} &bull; {{ benefit.period_label }}</p>
+
+<!-- Record new redemption -->
+<div class="card p-3 mb-4">
+  <h6 class="mb-3">Record Redemption</h6>
+  <form method="post" action="{{ url_for('benefit_redeem', id=benefit.id) }}" class="row g-2 align-items-end">
+    {% if benefit.credit_amount %}
+    <div class="col-sm-3">
+      <label class="form-label">Amount ($)</label>
+      <input name="amount" type="number" step="0.01" min="0.01"
+             max="{{ benefit.remaining }}" class="form-control"
+             placeholder="{{ '%.2f'|format(benefit.remaining) }}">
+      {% if not benefit.fully_used %}
+      <div class="form-text">${{ '%.2f'|format(benefit.remaining) }} remaining this period</div>
+      {% else %}
+      <div class="form-text text-warning">Period fully used</div>
+      {% endif %}
+    </div>
+    {% endif %}
+    <div class="col-sm-4">
+      <label class="form-label">Notes (optional)</label>
+      <input name="notes" type="text" class="form-control" placeholder="e.g. Dining at Nobu">
+    </div>
+    <div class="col-sm-3">
+      <label class="form-label">Date</label>
+      <input name="redemption_date" type="date" class="form-control" value="{{ today().isoformat() }}">
+    </div>
+    <div class="col-sm-2">
+      <button class="btn btn-primary w-100">Save</button>
+    </div>
+  </form>
+</div>
 
 {% if not redemptions %}
   <div class="text-muted">No redemptions recorded yet.</div>
