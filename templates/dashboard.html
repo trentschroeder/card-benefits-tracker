@@ -83,8 +83,11 @@
 
   .row-action {
     flex-shrink: 0;
-    width: 28px;
-    text-align: center;
+    width: 60px;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 4px;
   }
   .btn-add {
     width: 26px; height: 26px;
@@ -329,6 +332,9 @@
         <span class="days-badge {{ badge_class }}">{{ badge_label }}</span>
 
         <div class="row-action">
+          <a href="{{ url_for('benefit_redemptions', id=b.id) }}" class="btn-add" title="View history">
+            <i class="bi bi-clock-history"></i>
+          </a>
           <button class="btn-add"
                   data-bs-toggle="modal"
                   data-bs-target="#redeemModal{{ b.id }}"
@@ -370,7 +376,11 @@
             </span>
           {% endif %}
           <span class="days-badge days-badge-done">{{ badge_label }}</span>
-          <div class="row-action"></div>
+          <div class="row-action">
+            <a href="{{ url_for('benefit_redemptions', id=b.id) }}" class="btn-add" title="View history">
+              <i class="bi bi-clock-history"></i>
+            </a>
+          </div>
         </div>
       {% endfor %}
     </div>
