@@ -1,6 +1,6 @@
 import os
 import sqlite3
-from datetime import date
+from datetime import date, timedelta
 
 from flask import (Flask, flash, jsonify, redirect, render_template,
                    request, session, url_for)
@@ -569,12 +569,45 @@ def benefit_redemptions(id):
         flash('Benefit not found.', 'danger')
         return redirect(url_for('dashboard'))
     enriched = enrich_benefit(db, b)
+
+    _n_map = {'monthly': 12, 'quarterly': 4, 'semi-annual': 2, 'annual': 1}
+    period_history = []
+    period_states  = {}
+    check_date = date.today()
+    for _ in range(_n_map.get(enriched['period_type'], 1)):
+        p_start, p_end = get_current_period(enriched['period_type'], for_date=check_date)
+        if enriched['is_subscription']:
+            state       = 'full'
+            amount_used = enriched['credit_amount'] or 0.0
+        else:
+            pr = db.execute(
+                'SELECT COALESCE(SUM(amount),0) AS total, COUNT(*) AS cnt '
+                'FROM redemptions WHERE benefit_id=? AND period_start=?',
+                (enriched['id'], str(p_start))
+            ).fetchone()
+            amount_used = float(pr['total'])
+            if enriched['credit_amount']:
+                if amount_used >= enriched['credit_amount']:
+                    state = 'full'
+                elif amount_used > 0:
+                    state = 'partial'
+                else:
+                    state = 'none'
+            else:
+                state = 'full' if pr['cnt'] > 0 else 'none'
+        period_history.append({'period_start': p_start, 'period_end': p_end,
+                                'amount_used': amount_used, 'state': state})
+        period_states[str(p_start)] = state
+        check_date = p_start - timedelta(days=1)
+    period_history.reverse()
+
     redemptions = db.execute(
         'SELECT * FROM redemptions WHERE benefit_id = ? ORDER BY redeemed_at DESC',
         (id,)
     ).fetchall()
     db.close()
-    return render_template('benefits/redemptions.html', benefit=enriched, redemptions=redemptions)
+    return render_template('benefits/redemptions.html', benefit=enriched, redemptions=redemptions,
+                           period_history=period_history, period_states=period_states)
 
 
 # ── Settings ───────────────────────────────────────────────────────────────────
