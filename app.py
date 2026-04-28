@@ -478,7 +478,8 @@ def benefit_edit(id):
         card_id = b['card_id']
         db.close()
         flash(f'Benefit "{name}" updated.', 'success')
-        return redirect(url_for('card_detail', id=card_id))
+        next_url = request.form.get('_next') or url_for('card_detail', id=card_id)
+        return redirect(next_url)
 
     existing_days = [r['days_before'] for r in
                      db.execute('SELECT days_before FROM reminders WHERE benefit_id = ?', (id,)).fetchall()]
