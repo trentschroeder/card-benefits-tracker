@@ -1,7 +1,6 @@
 CREATE TABLE IF NOT EXISTS cards (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     name        TEXT    NOT NULL,
-    last_four   TEXT,
     annual_fee  REAL,
     owner_email TEXT,
     active      INTEGER NOT NULL DEFAULT 1,

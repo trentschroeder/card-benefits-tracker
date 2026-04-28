@@ -76,6 +76,11 @@ def init_db():
         db.commit()
     except Exception:
         pass
+    try:
+        db.execute('ALTER TABLE cards DROP COLUMN last_four')
+        db.commit()
+    except Exception:
+        pass
     db.close()
 
 
@@ -273,7 +278,6 @@ def cards_list():
 def card_new():
     if request.method == 'POST':
         name        = request.form.get('name', '').strip()
-        last_four   = request.form.get('last_four', '').strip() or None
         owner_email = request.form.get('owner_email', '').strip() or None
         annual_fee  = request.form.get('annual_fee', '').strip() or None
         if annual_fee:
@@ -286,8 +290,8 @@ def card_new():
             return render_template('cards/form.html', form=request.form)
         db = get_db()
         cur = db.execute(
-            'INSERT INTO cards (name, last_four, annual_fee, owner_email) VALUES (?, ?, ?, ?)',
-            (name, last_four, annual_fee, owner_email))
+            'INSERT INTO cards (name, annual_fee, owner_email) VALUES (?, ?, ?)',
+            (name, annual_fee, owner_email))
         cid = cur.lastrowid
         db.commit()
         db.close()
@@ -308,7 +312,6 @@ def card_detail(id):
 
     if request.method == 'POST':
         name        = request.form.get('name', '').strip()
-        last_four   = request.form.get('last_four', '').strip() or None
         active      = 1 if request.form.get('active') else 0
         owner_email = request.form.get('owner_email', '').strip() or None
         annual_fee  = request.form.get('annual_fee', '').strip() or None
@@ -321,8 +324,8 @@ def card_detail(id):
             flash('Card name is required.', 'danger')
         else:
             db.execute(
-                'UPDATE cards SET name=?, last_four=?, active=?, annual_fee=?, owner_email=? WHERE id=?',
-                (name, last_four, active, annual_fee, owner_email, id))
+                'UPDATE cards SET name=?, active=?, annual_fee=?, owner_email=? WHERE id=?',
+                (name, active, annual_fee, owner_email, id))
             db.commit()
             flash('Card updated.', 'success')
         db.close()
@@ -639,7 +642,7 @@ def send_summary():
         for card in cards:
             pending = _pending_for_card(card)
             if pending:
-                cards_data.append({'card_name': card['name'], 'last_four': card['last_four'], 'benefits': pending})
+                cards_data.append({'card_name': card['name'], 'benefits': pending})
         db.close()
         if not cards_data:
             flash('Nothing to send — all benefits are fully used or set to auto.', 'info')
@@ -661,7 +664,7 @@ def send_summary():
             pending = _pending_for_card(card)
             if pending:
                 by_recipient.setdefault(card['owner_email'], []).append(
-                    {'card_name': card['name'], 'last_four': card['last_four'], 'benefits': pending}
+                    {'card_name': card['name'], 'benefits': pending}
                 )
         db.close()
         if not by_recipient:
@@ -709,7 +712,7 @@ def _run_reminder_check(force=False):
     benefits_due = []
 
     raw = db.execute('''
-        SELECT b.*, c.name AS card_name, c.last_four, c.owner_email
+        SELECT b.*, c.name AS card_name, c.owner_email
         FROM benefits b
         JOIN cards c ON c.id = b.card_id
         WHERE b.active = 1 AND c.active = 1
@@ -737,7 +740,6 @@ def _run_reminder_check(force=False):
                     benefits_due.append({
                         'to':            card_recipient,
                         'card_name':     row['card_name'],
-                        'last_four':     row['last_four'],
                         'benefit_name':  b['name'],
                         'credit_amount': b['credit_amount'],
                         'amount_used':   b['amount_used'],

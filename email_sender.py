@@ -6,7 +6,7 @@ from email.mime.text import MIMEText
 def send_reminder_email(gmail_user, gmail_app_password, recipient, benefits_due):
     """
     benefits_due: list of dicts with keys:
-      card_name, last_four, benefit_name, credit_amount,
+      card_name, benefit_name, credit_amount,
       amount_used, period_end, days_left
     """
     if not benefits_due:
@@ -17,8 +17,6 @@ def send_reminder_email(gmail_user, gmail_app_password, recipient, benefits_due)
     html_rows = ""
     for b in benefits_due:
         card_label = b['card_name']
-        if b.get('last_four'):
-            card_label += f" (…{b['last_four']})"
 
         if b['credit_amount']:
             remaining = b['credit_amount'] - (b['amount_used'] or 0)
@@ -75,7 +73,7 @@ def send_reminder_email(gmail_user, gmail_app_password, recipient, benefits_due)
 def send_summary_email(gmail_user, gmail_app_password, recipient, cards_data):
     """
     cards_data: list of dicts with keys:
-      card_name, last_four, benefits (list of enriched benefit dicts)
+      card_name, benefits (list of enriched benefit dicts)
     Only non-fully-used, non-subscription benefits are included.
     """
     from datetime import date
@@ -89,8 +87,6 @@ def send_summary_email(gmail_user, gmail_app_password, recipient, cards_data):
             continue
 
         card_label = card['card_name']
-        if card.get('last_four'):
-            card_label += f" (…{card['last_four']})"
 
         rows = ""
         for b in card['benefits']:

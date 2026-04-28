@@ -3,10 +3,7 @@
 {% block content %}
 
 <div class="d-flex align-items-center gap-2 mb-4">
-  <h2 class="mb-0">
-    {{ card.name }}
-    {% if card.last_four %}<span class="text-muted fw-normal fs-5">&nbsp;…{{ card.last_four }}</span>{% endif %}
-  </h2>
+  <h2 class="mb-0">{{ card.name }}</h2>
   {% if not card.active %}<span class="badge bg-secondary">Inactive</span>{% endif %}
 </div>
 
@@ -20,11 +17,6 @@
       <div class="col-sm-8">
         <label class="form-label">Card Name</label>
         <input name="name" type="text" class="form-control" value="{{ card.name }}" required>
-      </div>
-      <div class="col-sm-4">
-        <label class="form-label">Last Four</label>
-        <input name="last_four" type="text" maxlength="4" class="form-control"
-               value="{{ card.last_four or '' }}">
       </div>
       <div class="col-sm-4">
         <label class="form-label">Annual Fee ($)</label>

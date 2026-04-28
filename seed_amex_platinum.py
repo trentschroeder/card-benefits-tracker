@@ -52,16 +52,13 @@ BENEFITS = [
      200.00, 'annual', [30]),
 ]
 
-CARDS = [
-    ('Kevin', None),   # (name_prefix, last_four)
-    ('Trent', None),
-]
+CARDS = ['Kevin', 'Trent']
 
 db = sqlite3.connect(DATABASE)
 db.row_factory = sqlite3.Row
 db.execute('PRAGMA foreign_keys = ON')
 
-for name_prefix, last_four in CARDS:
+for name_prefix in CARDS:
     card_name = f"{name_prefix}'s Amex Platinum"
 
     existing = db.execute('SELECT id FROM cards WHERE name = ?', (card_name,)).fetchone()
@@ -70,8 +67,8 @@ for name_prefix, last_four in CARDS:
         continue
 
     cur = db.execute(
-        'INSERT INTO cards (name, last_four) VALUES (?, ?)',
-        (card_name, last_four))
+        'INSERT INTO cards (name) VALUES (?)',
+        (card_name,))
     card_id = cur.lastrowid
     print(f'Created card: {card_name} (id={card_id})')
 

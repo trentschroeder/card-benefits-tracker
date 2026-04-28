@@ -238,10 +238,7 @@
     <button class="btn-collapse" onclick="toggleCard({{ card.id }})" title="Expand / collapse">
       <i class="bi bi-chevron-down" id="collapse-chevron-{{ card.id }}"></i>
     </button>
-    <span class="fw-semibold" style="font-size:.95rem;">
-      {{ card.name }}
-      {% if card.last_four %}<span class="text-muted fw-normal">&thinsp;…{{ card.last_four }}</span>{% endif %}
-    </span>
+    <span class="fw-semibold" style="font-size:.95rem;">{{ card.name }}</span>
     <a href="{{ url_for('card_detail', id=card.id) }}"
        class="btn btn-outline-secondary ms-auto py-0 px-2" style="font-size:.72rem;">
       <i class="bi bi-pencil"></i>

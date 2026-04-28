@@ -20,7 +20,6 @@
     <thead>
       <tr>
         <th>Card</th>
-        <th>Last Four</th>
         <th>Benefits</th>
         <th>Status</th>
         <th></th>
@@ -30,7 +29,6 @@
       {% for card in cards %}
       <tr>
         <td class="fw-semibold">{{ card.name }}</td>
-        <td>{% if card.last_four %}…{{ card.last_four }}{% else %}<span class="text-muted">—</span>{% endif %}</td>
         <td>{{ card.benefit_count }}</td>
         <td>
           {% if card.active %}
