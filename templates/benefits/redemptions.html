@@ -27,104 +27,106 @@
 
 <!-- Benefit info strip -->
 <div class="card p-3 mb-4">
-  <div class="row g-3 align-items-center">
-    {% if benefit.description %}
-    <div class="col-12 col-sm">
-      <div class="text-muted" style="font-size:.8rem; text-transform:uppercase; letter-spacing:.05em;">Description</div>
-      <div style="font-size:.9rem;">{{ benefit.description }}</div>
-    </div>
-    {% endif %}
-    <div class="col-auto">
-      <div class="text-muted" style="font-size:.8rem; text-transform:uppercase; letter-spacing:.05em;">Recurrence</div>
-      <span class="badge bg-secondary">{{ benefit.period_label }}</span>
-      {% if benefit.is_subscription %}<span class="badge bg-success ms-1"><i class="bi bi-arrow-repeat me-1"></i>Subscription</span>{% endif %}
-    </div>
-    {% if benefit.credit_amount %}
-    <div class="col-auto">
-      <div class="text-muted" style="font-size:.8rem; text-transform:uppercase; letter-spacing:.05em;">Per Period</div>
-      <div class="fw-semibold">${{ "%.2f"|format(benefit.credit_amount) }}</div>
-    </div>
-    <div class="col-auto">
-      <div class="text-muted" style="font-size:.8rem; text-transform:uppercase; letter-spacing:.05em;">This Period</div>
-      {% if benefit.fully_used %}
-        <span class="text-success fw-semibold"><i class="bi bi-check-circle me-1"></i>Complete</span>
-      {% else %}
-        <div class="fw-semibold">${{ "%.2f"|format(benefit.remaining) }} left</div>
+  <div class="d-flex align-items-start gap-2">
+    <div class="row g-3 align-items-center flex-grow-1">
+      {% if benefit.description %}
+      <div class="col-12 col-sm">
+        <div class="text-muted" style="font-size:.8rem; text-transform:uppercase; letter-spacing:.05em;">Description</div>
+        <div style="font-size:.9rem;">{{ benefit.description }}</div>
+      </div>
       {% endif %}
-    </div>
-    {% endif %}
-    <div class="col-auto">
-      <div class="text-muted" style="font-size:.8rem; text-transform:uppercase; letter-spacing:.05em;">Period Ends</div>
-      <div style="font-size:.9rem;">{{ benefit.period_end.strftime('%b %d, %Y') }}
-        <span class="text-muted">({{ benefit.days_left }}d)</span>
+      <div class="col-auto">
+        <div class="text-muted" style="font-size:.8rem; text-transform:uppercase; letter-spacing:.05em;">Recurrence</div>
+        <span class="badge bg-secondary">{{ benefit.period_label }}</span>
+        {% if benefit.is_subscription %}<span class="badge bg-success ms-1"><i class="bi bi-arrow-repeat me-1"></i>Subscription</span>{% endif %}
+      </div>
+      {% if benefit.credit_amount %}
+      <div class="col-auto">
+        <div class="text-muted" style="font-size:.8rem; text-transform:uppercase; letter-spacing:.05em;">Per Period</div>
+        <div class="fw-semibold">${{ "%.2f"|format(benefit.credit_amount) }}</div>
+      </div>
+      <div class="col-auto">
+        <div class="text-muted" style="font-size:.8rem; text-transform:uppercase; letter-spacing:.05em;">This Period</div>
+        {% if benefit.fully_used %}
+          <span class="text-success fw-semibold"><i class="bi bi-check-circle me-1"></i>Complete</span>
+        {% else %}
+          <div class="fw-semibold">${{ "%.2f"|format(benefit.remaining) }} left</div>
+        {% endif %}
+      </div>
+      {% endif %}
+      <div class="col-auto">
+        <div class="text-muted" style="font-size:.8rem; text-transform:uppercase; letter-spacing:.05em;">Period Ends</div>
+        <div style="font-size:.9rem;">{{ benefit.period_end.strftime('%b %d, %Y') }}
+          <span class="text-muted">({{ benefit.days_left }}d)</span>
+        </div>
       </div>
     </div>
+    <button class="btn btn-link p-0 text-muted flex-shrink-0" onclick="toggleBenefitEdit()" title="Edit settings">
+      <i class="bi bi-gear fs-5" id="gear-icon"></i>
+    </button>
+  </div>
+
+  <!-- Inline edit form -->
+  <div id="benefitEditForm" style="display:none; border-top:1px solid var(--border-color); margin-top:1rem; padding-top:1rem;">
+    <form method="post" action="{{ url_for('benefit_edit', id=benefit.id) }}">
+      <input type="hidden" name="_next" value="{{ url_for('benefit_redemptions', id=benefit.id) }}">
+      <div class="row g-3">
+        <div class="col-sm-6">
+          <label class="form-label">Benefit Name</label>
+          <input name="name" type="text" class="form-control" value="{{ benefit.name }}" required>
+        </div>
+        <div class="col-sm-6">
+          <label class="form-label">Description</label>
+          <input name="description" type="text" class="form-control" value="{{ benefit.description or '' }}" placeholder="Optional details">
+        </div>
+        <div class="col-sm-3">
+          <label class="form-label">Credit Amount ($)</label>
+          <input name="credit_amount" type="number" step="0.01" min="0" class="form-control"
+                 value="{{ benefit.credit_amount or '' }}" placeholder="Leave blank for used/not-used">
+        </div>
+        <div class="col-sm-3">
+          <label class="form-label">Renewal Period</label>
+          <select name="period_type" class="form-select">
+            {% for key, label in period_labels.items() %}
+              <option value="{{ key }}" {% if benefit.period_type == key %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-sm-6 d-flex align-items-center">
+          <div class="form-check form-switch mt-3">
+            <input name="is_subscription" type="checkbox" class="form-check-input" id="editIsSubscription"
+                   role="switch" {% if benefit.is_subscription %}checked{% endif %}>
+            <label class="form-check-label" for="editIsSubscription">
+              <i class="bi bi-arrow-repeat me-1"></i>Subscription (auto-mark used each period)
+            </label>
+          </div>
+        </div>
+        <div class="col-12">
+          <label class="form-label"><i class="bi bi-bell me-1"></i>Email Reminders</label>
+          <div class="form-text mb-2">Send a reminder this many days before the period ends.</div>
+          <div class="d-flex flex-wrap gap-3">
+            {% for days in [1, 3, 7, 14, 30] %}
+            <div class="form-check">
+              <input type="checkbox" name="reminder_days" value="{{ days }}"
+                     id="editRem{{ days }}" class="form-check-input"
+                     {% if days in benefit.reminder_days %}checked{% endif %}>
+              <label class="form-check-label" for="editRem{{ days }}">{{ days }} day{{ 's' if days != 1 }}</label>
+            </div>
+            {% endfor %}
+          </div>
+        </div>
+        <div class="col-12 form-check ms-1">
+          <input name="active" type="checkbox" class="form-check-input" id="editActive"
+                 {% if benefit.active %}checked{% endif %}>
+          <label class="form-check-label" for="editActive">Active</label>
+        </div>
+      </div>
+      <div class="mt-3">
+        <button class="btn btn-primary btn-sm">Save Changes</button>
+      </div>
+    </form>
   </div>
 </div>
-
-<!-- Edit benefit settings -->
-<details class="card p-3 mb-4">
-  <summary class="fw-semibold" style="cursor:pointer; list-style:none;">
-    <i class="bi bi-pencil me-1"></i>Edit Benefit Settings
-  </summary>
-  <form method="post" action="{{ url_for('benefit_edit', id=benefit.id) }}" class="mt-3">
-    <input type="hidden" name="_next" value="{{ url_for('benefit_redemptions', id=benefit.id) }}">
-    <div class="row g-3">
-      <div class="col-sm-6">
-        <label class="form-label">Benefit Name</label>
-        <input name="name" type="text" class="form-control" value="{{ benefit.name }}" required>
-      </div>
-      <div class="col-sm-6">
-        <label class="form-label">Description</label>
-        <input name="description" type="text" class="form-control" value="{{ benefit.description or '' }}" placeholder="Optional details">
-      </div>
-      <div class="col-sm-3">
-        <label class="form-label">Credit Amount ($)</label>
-        <input name="credit_amount" type="number" step="0.01" min="0" class="form-control"
-               value="{{ benefit.credit_amount or '' }}" placeholder="Leave blank for used/not-used">
-      </div>
-      <div class="col-sm-3">
-        <label class="form-label">Renewal Period</label>
-        <select name="period_type" class="form-select">
-          {% for key, label in period_labels.items() %}
-            <option value="{{ key }}" {% if benefit.period_type == key %}selected{% endif %}>{{ label }}</option>
-          {% endfor %}
-        </select>
-      </div>
-      <div class="col-sm-6 d-flex align-items-center">
-        <div class="form-check form-switch mt-3">
-          <input name="is_subscription" type="checkbox" class="form-check-input" id="editIsSubscription"
-                 role="switch" {% if benefit.is_subscription %}checked{% endif %}>
-          <label class="form-check-label" for="editIsSubscription">
-            <i class="bi bi-arrow-repeat me-1"></i>Subscription (auto-mark used each period)
-          </label>
-        </div>
-      </div>
-      <div class="col-12">
-        <label class="form-label"><i class="bi bi-bell me-1"></i>Email Reminders</label>
-        <div class="form-text mb-2">Send a reminder this many days before the period ends.</div>
-        <div class="d-flex flex-wrap gap-3">
-          {% for days in [1, 3, 7, 14, 30] %}
-          <div class="form-check">
-            <input type="checkbox" name="reminder_days" value="{{ days }}"
-                   id="editRem{{ days }}" class="form-check-input"
-                   {% if days in benefit.reminder_days %}checked{% endif %}>
-            <label class="form-check-label" for="editRem{{ days }}">{{ days }} day{{ 's' if days != 1 }}</label>
-          </div>
-          {% endfor %}
-        </div>
-      </div>
-      <div class="col-12 form-check ms-1">
-        <input name="active" type="checkbox" class="form-check-input" id="editActive"
-               {% if benefit.active %}checked{% endif %}>
-        <label class="form-check-label" for="editActive">Active</label>
-      </div>
-    </div>
-    <div class="mt-3">
-      <button class="btn btn-primary btn-sm">Save Changes</button>
-    </div>
-  </form>
-</details>
 
 <!-- Record new redemption -->
 {% if not benefit.is_subscription %}
@@ -220,10 +222,16 @@
           <td>{{ r.notes or '—' }}</td>
           <td class="text-muted small">{{ r.redeemed_at[:10] }}</td>
           <td class="text-end">
-            <form method="post" action="{{ url_for('redemption_delete', id=r.id) }}"
-                  onsubmit="return confirm('Remove this redemption?')">
-              <button class="btn btn-outline-danger btn-sm"><i class="bi bi-trash"></i></button>
-            </form>
+            <div class="d-flex gap-1 justify-content-end">
+              <button class="btn btn-outline-secondary btn-sm" data-bs-toggle="modal"
+                      data-bs-target="#editModal{{ r.id }}" title="Edit">
+                <i class="bi bi-pencil"></i>
+              </button>
+              <form method="post" action="{{ url_for('redemption_delete', id=r.id) }}"
+                    onsubmit="return confirm('Remove this redemption?')">
+                <button class="btn btn-outline-danger btn-sm"><i class="bi bi-trash"></i></button>
+              </form>
+            </div>
           </td>
         </tr>
         {% endfor %}
@@ -234,6 +242,44 @@
 
 </div>
 
+<!-- Edit redemption modals -->
+{% for r in redemptions %}
+<div class="modal fade" id="editModal{{ r.id }}" tabindex="-1">
+  <div class="modal-dialog modal-sm">
+    <div class="modal-content">
+      <div class="modal-header py-2">
+        <h6 class="modal-title">Edit Redemption</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <form method="post" action="{{ url_for('redemption_edit', id=r.id) }}">
+        <div class="modal-body">
+          {% if benefit.credit_amount %}
+          <div class="mb-3">
+            <label class="form-label">Amount ($)</label>
+            <input name="amount" type="number" step="0.01" min="0.01" class="form-control"
+                   value="{{ '%.2f'|format(r.amount) if r.amount else '' }}">
+          </div>
+          {% endif %}
+          <div class="mb-3">
+            <label class="form-label">Notes</label>
+            <input name="notes" type="text" class="form-control" value="{{ r.notes or '' }}">
+          </div>
+          <div>
+            <label class="form-label">Date</label>
+            <input name="redemption_date" type="date" class="form-control"
+                   value="{{ r.period_start }}" style="max-width:160px;">
+          </div>
+        </div>
+        <div class="modal-footer py-2">
+          <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+          <button class="btn btn-primary btn-sm">Save</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endfor %}
+
 {% endblock %}
 
 {% block scripts %}
@@ -242,13 +288,12 @@
     new bootstrap.Tooltip(el, { trigger: 'hover focus' });
   });
 
-  function toggleDetail(ps) {
-    var row  = document.getElementById('detail-' + ps);
-    var chev = document.getElementById('chev-' + ps);
-    if (!row) return;
-    var open = row.style.display === 'none';
-    row.style.display = open ? 'table-row' : 'none';
-    if (chev) chev.style.transform = open ? 'rotate(90deg)' : '';
+  function toggleBenefitEdit() {
+    var form = document.getElementById('benefitEditForm');
+    var icon = document.getElementById('gear-icon');
+    var open = form.style.display === 'none';
+    form.style.display = open ? '' : 'none';
+    icon.className = open ? 'bi bi-gear-fill fs-5' : 'bi bi-gear fs-5';
   }
 </script>
 {% endblock %}

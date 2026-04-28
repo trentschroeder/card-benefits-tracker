@@ -543,6 +543,35 @@ def benefit_redeem(id):
     return redirect(request.referrer or url_for('dashboard'))
 
 
+@app.route('/redemptions/<int:id>/edit', methods=['POST'])
+@login_required
+def redemption_edit(id):
+    db  = get_db()
+    row = db.execute(
+        'SELECT r.*, b.period_type FROM redemptions r JOIN benefits b ON b.id = r.benefit_id WHERE r.id = ?', (id,)
+    ).fetchone()
+    if not row:
+        db.close()
+        return redirect(url_for('dashboard'))
+    amount   = request.form.get('amount', '').strip() or None
+    notes    = request.form.get('notes', '').strip() or None
+    date_str = request.form.get('redemption_date', '').strip()
+    if amount:
+        try:    amount = float(amount)
+        except ValueError: amount = None
+    redemption_date = None
+    if date_str:
+        try:    redemption_date = date.fromisoformat(date_str)
+        except ValueError: pass
+    period_start, _ = get_current_period(row['period_type'], for_date=redemption_date)
+    db.execute('UPDATE redemptions SET amount=?, notes=?, period_start=? WHERE id=?',
+               (amount, notes, str(period_start), id))
+    db.commit()
+    db.close()
+    flash('Redemption updated.', 'success')
+    return redirect(request.referrer or url_for('dashboard'))
+
+
 @app.route('/redemptions/<int:id>/delete', methods=['POST'])
 @login_required
 def redemption_delete(id):
