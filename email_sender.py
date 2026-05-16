@@ -54,7 +54,7 @@ def send_reminder_email(gmail_user, gmail_app_password, recipient, benefits_due)
       <tbody>{html_rows}</tbody>
     </table>
     <p style="margin-top:20px;font-size:0.9em;color:#666;">
-      Log in to your <a href="http://localhost:5001">Credit Card Benefits</a> dashboard to record usage.
+      Log in to your <a href="https://cardbenefits.trentschroeder.com">Credit Card Benefits</a> dashboard to record usage.
     </p>
     </body></html>
     """
@@ -145,7 +145,7 @@ def send_summary_email(gmail_user, gmail_app_password, recipient, cards_data):
       </div>
       {card_blocks}
       <p style="font-size:12px;color:#999;border-top:1px solid #eee;padding-top:12px;margin-top:8px;">
-        Sent from your <a href="http://localhost:5001" style="color:#1a3c8a;">Card Benefits</a> dashboard.
+        Sent from your <a href="https://cardbenefits.trentschroeder.com" style="color:#1a3c8a;">Card Benefits</a> dashboard.
       </p>
     </body></html>
     """
