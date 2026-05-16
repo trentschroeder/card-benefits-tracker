@@ -3,12 +3,72 @@
 
 {% block head %}
 <style>
+  /* ── Card section wrapper ──────────────────────────────── */
+  .card-section {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    box-shadow: var(--card-shadow);
+    overflow: hidden;
+  }
+  .card-section-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 16px;
+    cursor: pointer;
+    user-select: none;
+    border-bottom: 1px solid var(--border-color);
+    transition: background .12s;
+  }
+  .card-section-header:hover {
+    background: color-mix(in srgb, var(--bg-card) 90%, var(--text-primary) 10%);
+  }
+  .card-section.is-collapsed .card-section-header { border-bottom: none; }
+  .card-section-chevron {
+    color: var(--text-muted);
+    font-size: .8rem;
+    transition: transform .2s;
+    flex-shrink: 0;
+  }
+  .card-section-title {
+    font-size: 1.05rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    flex: 1 1 auto;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .card-section-stats {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    font-size: .78rem;
+    color: var(--text-muted);
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  .cs-stat-captured { color: var(--text-primary); font-weight: 700; }
+  .card-section-edit {
+    width: 30px; height: 30px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 6px;
+    color: var(--text-muted);
+    text-decoration: none;
+    flex-shrink: 0;
+    transition: background .12s, color .12s;
+  }
+  .card-section-edit:hover { background: var(--bg-input); color: var(--text-primary); }
+  .card-section-body { padding: 12px 0 0; }
+  [data-theme="ai"] .card-section-header:hover { background: rgba(0,200,255,.05); }
+
   /* ── Benefit rows ──────────────────────────────────────── */
   .benefit-list {
-    border-radius: 8px;
-    overflow: hidden;
-    border: 1px solid var(--border-color);
-    box-shadow: var(--card-shadow);
+    border-top: 1px solid var(--border-color);
   }
   .benefit-row {
     display: flex;
@@ -129,14 +189,6 @@
   .done-row { opacity: .5; }
   .done-row:hover { opacity: .75; }
 
-  /* ── Card header ───────────────────────────────────────── */
-  .card-header-row {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin-bottom: 6px;
-  }
-
   /* ── AI pulsing ────────────────────────────────────────── */
   @keyframes dotPulse {
     0%,100% { box-shadow: 0 0 0 0 rgba(220,53,69,.6); }
@@ -145,8 +197,8 @@
   [data-theme="ai"] .row-dot.dot-high { animation: dotPulse 2s ease-in-out infinite; }
 
   /* ── ROI merged bar ────────────────────────────────────── */
-  .roi-wrap { margin-bottom: 6px; }
-  .roi-bar-outer { position: relative; margin-bottom: 3px; }
+  .roi-wrap { padding: 0 16px 12px; }
+  .roi-bar-outer { position: relative; }
   .roi-progress { height: 8px !important; border-radius: 4px; }
   .roi-fee-tick {
     position: absolute;
@@ -158,35 +210,14 @@
     transform: translateX(-50%);
     opacity: .7;
   }
-  .roi-legend {
-    display: flex;
-    gap: 8px;
-    font-size: .68rem;
-    color: var(--text-muted);
-    flex-wrap: wrap;
-  }
-  .roi-legend .roi-captured { font-weight: 700; color: var(--text-primary); }
   [data-theme="ai"] .roi-fee-tick { background: #7090c0; }
-
-  /* ── Collapse button ────────────────────────────────────── */
-  .btn-collapse {
-    width: 22px; height: 22px;
-    background: none;
-    border: none;
-    color: var(--text-muted);
-    cursor: pointer;
-    padding: 0;
-    display: flex; align-items: center; justify-content: center;
-    font-size: .75rem;
-    flex-shrink: 0;
-  }
-  .btn-collapse:hover { color: var(--text-primary); }
-  .btn-collapse i { transition: transform .2s; }
 
   /* ── Hide on small screens ─────────────────────────────── */
   @media (max-width: 575px) {
     .row-period, .row-bar-wrap { display: none; }
     .row-amount { width: auto; }
+    .card-section-header { flex-wrap: wrap; row-gap: 4px; }
+    .card-section-stats { flex-basis: 100%; padding-left: 22px; font-size: .72rem; gap: 10px; }
   }
 </style>
 {% endblock %}
@@ -232,20 +263,27 @@
 {% set pending = dc.benefits | selectattr('fully_used', 'false') | list %}
 {% set done    = dc.benefits | selectattr('fully_used') | list %}
 
-<div class="mb-4">
+<div class="card-section mb-4" id="card-section-{{ card.id }}">
   <!-- Card header -->
-  <div class="card-header-row">
-    <button class="btn-collapse" onclick="toggleCard({{ card.id }})" title="Expand / collapse">
-      <i class="bi bi-chevron-down" id="collapse-chevron-{{ card.id }}"></i>
-    </button>
-    <span class="fw-semibold" style="font-size:.95rem;">{{ card.name }}</span>
-    <a href="{{ url_for('card_detail', id=card.id) }}"
-       class="btn btn-outline-secondary ms-auto py-0 px-2" style="font-size:.72rem;">
+  <div class="card-section-header" onclick="toggleCard({{ card.id }})">
+    <i class="bi bi-chevron-down card-section-chevron" id="collapse-chevron-{{ card.id }}"></i>
+    <div class="card-section-title">
+      <i class="bi bi-credit-card-2-front me-2 text-muted"></i>{{ card.name }}
+    </div>
+    {% if roi.max_possible > 0 %}
+    <div class="card-section-stats">
+      <span><span class="cs-stat-captured">${{ roi.captured | int }}</span> captured</span>
+      {% if card.annual_fee %}<span>${{ card.annual_fee | int }} fee</span>{% endif %}
+      <span>${{ roi.max_possible | int }} max</span>
+    </div>
+    {% endif %}
+    <a href="{{ url_for('card_detail', id=card.id) }}" class="card-section-edit"
+       onclick="event.stopPropagation()" title="Edit card">
       <i class="bi bi-pencil"></i>
     </a>
   </div>
 
-  <div id="card-body-{{ card.id }}">
+  <div class="card-section-body" id="card-body-{{ card.id }}">
 
   <!-- ROI merged bar -->
   {% if roi.max_possible > 0 %}
@@ -263,16 +301,11 @@
       <div class="roi-fee-tick" style="left:{{ roi.fee_tick_pct }}%;"></div>
       {% endif %}
     </div>
-    <div class="roi-legend">
-      <span class="roi-captured">${{ roi.captured | int }} captured</span>
-      {% if card.annual_fee %}<span>· ${{ card.annual_fee | int }} fee</span>{% endif %}
-      <span>· ${{ roi.max_possible | int }} max</span>
-    </div>
   </div>
   {% endif %}
 
   {% if not dc.benefits %}
-    <div class="text-muted small ps-3">No active benefits. <a href="{{ url_for('benefit_new', card_id=card.id) }}">Add one</a>.</div>
+    <div class="text-muted small px-3 pb-3">No active benefits. <a href="{{ url_for('benefit_new', card_id=card.id) }}">Add one</a>.</div>
   {% else %}
 
   <div class="benefit-list">
@@ -449,9 +482,11 @@
   function toggleCard(id) {
     var body    = document.getElementById('card-body-' + id);
     var chevron = document.getElementById('collapse-chevron-' + id);
+    var section = document.getElementById('card-section-' + id);
     var isHidden = body.style.display === 'none';
     body.style.display = isHidden ? '' : 'none';
     if (chevron) chevron.style.transform = isHidden ? '' : 'rotate(-90deg)';
+    if (section) section.classList.toggle('is-collapsed', !isHidden);
     if (isHidden) localStorage.removeItem('cb-card-collapsed-' + id);
     else          localStorage.setItem('cb-card-collapsed-' + id, '1');
   }
@@ -464,6 +499,8 @@
         body.style.display = 'none';
         var ch = document.getElementById('collapse-chevron-' + id);
         if (ch) ch.style.transform = 'rotate(-90deg)';
+        var sec = document.getElementById('card-section-' + id);
+        if (sec) sec.classList.add('is-collapsed');
       }
     });
   });
