@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="light">
+<html lang="en" data-theme="ai">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -411,7 +411,7 @@
   <!-- Apply saved theme before paint to prevent flash -->
   <script>
     (function() {
-      var t = localStorage.getItem('cb-theme') || 'light';
+      var t = localStorage.getItem('cb-theme') || 'ai';
       document.documentElement.setAttribute('data-theme', t);
     })();
   </script>
@@ -497,7 +497,7 @@
   }
   // Mark active button on load
   (function() {
-    var t = localStorage.getItem('cb-theme') || 'light';
+    var t = localStorage.getItem('cb-theme') || 'ai';
     var btn = document.getElementById('btn-' + t);
     if (btn) btn.classList.add('active');
   })();
