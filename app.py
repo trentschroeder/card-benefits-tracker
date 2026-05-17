@@ -623,11 +623,20 @@ def benefit_redemptions(id):
     period_history = []
     period_states  = {}
     check_date = date.today()
+    sub_start = date.fromisoformat(enriched['subscription_start']) if enriched.get('subscription_start') else None
+    sub_end   = date.fromisoformat(enriched['subscription_end'])   if enriched.get('subscription_end')   else None
     for _ in range(_n_map.get(enriched['period_type'], 1)):
         p_start, p_end = get_current_period(enriched['period_type'], for_date=check_date)
         if enriched['is_subscription']:
-            state       = 'full'
-            amount_used = enriched['credit_amount'] or 0.0
+            in_window = True
+            if sub_start and p_end < sub_start:   in_window = False
+            if sub_end   and p_start > sub_end:   in_window = False
+            if in_window:
+                state       = 'full'
+                amount_used = enriched['credit_amount'] or 0.0
+            else:
+                state       = 'inactive'
+                amount_used = 0.0
         else:
             pr = db.execute(
                 'SELECT COALESCE(SUM(amount),0) AS total, COUNT(*) AS cnt '
@@ -646,17 +655,6 @@ def benefit_redemptions(id):
         period_states[str(p_start)] = state
         check_date = p_start - timedelta(days=1)
     period_history.reverse()
-
-    # For subscriptions, hide periods that fall outside the active window from the bar chart.
-    if enriched['is_subscription']:
-        sub_start_raw = enriched.get('subscription_start')
-        sub_end_raw   = enriched.get('subscription_end')
-        sub_start = date.fromisoformat(sub_start_raw) if sub_start_raw else None
-        sub_end   = date.fromisoformat(sub_end_raw)   if sub_end_raw   else None
-        if sub_start:
-            period_history = [p for p in period_history if p['period_end'] >= sub_start]
-        if sub_end:
-            period_history = [p for p in period_history if p['period_start'] <= sub_end]
 
     # Group all redemptions by period_start
     from collections import defaultdict
