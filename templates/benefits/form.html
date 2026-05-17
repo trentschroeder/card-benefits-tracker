@@ -52,12 +52,29 @@
             <input name="is_subscription" type="checkbox" class="form-check-input" id="isSubscription"
                    role="switch"
                    {% if form.get('is_subscription') %}checked{% endif %}
-                   onchange="document.getElementById('reminderSection').style.opacity = this.checked ? '.4' : '1'">
+                   onchange="document.getElementById('reminderSection').style.opacity = this.checked ? '.4' : '1';
+                            document.getElementById('subscriptionDates').classList.toggle('d-none', !this.checked);">
             <label class="form-check-label fw-semibold" for="isSubscription">
               <i class="bi bi-arrow-repeat me-1"></i>This is a subscription
             </label>
           </div>
           <div class="form-text">When enabled, this benefit is automatically marked fully utilized every period — no manual recording or reminders needed. Uncheck if you cancel the subscription.</div>
+
+          <div id="subscriptionDates" class="row g-3 mt-1 ms-1 {% if not form.get('is_subscription') %}d-none{% endif %}">
+            <div class="col-sm-6">
+              <label class="form-label small">Subscription start</label>
+              <input name="subscription_start" type="date" class="form-control form-control-sm"
+                     value="{{ form.get('subscription_start', '') or '' }}">
+            </div>
+            <div class="col-sm-6">
+              <label class="form-label small">Subscription end</label>
+              <input name="subscription_end" type="date" class="form-control form-control-sm"
+                     value="{{ form.get('subscription_end', '') or '' }}">
+            </div>
+            <div class="col-12">
+              <div class="form-text">Hides periods outside this window from the utilization bar chart.</div>
+            </div>
+          </div>
         </div>
 
         <!-- Reminder schedule -->

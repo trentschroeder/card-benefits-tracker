@@ -140,13 +140,29 @@
             {% endfor %}
           </select>
         </div>
-        <div class="col-sm-6 d-flex align-items-center">
+        <div class="col-sm-6">
           <div class="form-check form-switch mt-3">
             <input name="is_subscription" type="checkbox" class="form-check-input" id="editIsSubscription"
-                   role="switch" {% if benefit.is_subscription %}checked{% endif %}>
+                   role="switch" {% if benefit.is_subscription %}checked{% endif %}
+                   onchange="document.getElementById('editSubscriptionDates').classList.toggle('d-none', !this.checked);">
             <label class="form-check-label" for="editIsSubscription">
               <i class="bi bi-arrow-repeat me-1"></i>Subscription (auto-mark used each period)
             </label>
+          </div>
+          <div id="editSubscriptionDates" class="row g-2 mt-1 {% if not benefit.is_subscription %}d-none{% endif %}">
+            <div class="col-6">
+              <label class="form-label small mb-1">Start</label>
+              <input name="subscription_start" type="date" class="form-control form-control-sm"
+                     value="{{ benefit.subscription_start or '' }}">
+            </div>
+            <div class="col-6">
+              <label class="form-label small mb-1">End</label>
+              <input name="subscription_end" type="date" class="form-control form-control-sm"
+                     value="{{ benefit.subscription_end or '' }}">
+            </div>
+            <div class="col-12">
+              <div class="form-text">Hides periods outside this window from the utilization bar chart.</div>
+            </div>
           </div>
         </div>
         <div class="col-12">

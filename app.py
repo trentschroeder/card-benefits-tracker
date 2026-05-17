@@ -81,6 +81,12 @@ def init_db():
         db.commit()
     except Exception:
         pass
+    for col in ('subscription_start', 'subscription_end'):
+        try:
+            db.execute(f'ALTER TABLE benefits ADD COLUMN {col} DATE')
+            db.commit()
+        except Exception:
+            pass
     db.close()
 
 
@@ -227,6 +233,11 @@ def dashboard():
         total_benefits += len(enriched)
         total_used += sum(1 for b in enriched if b['fully_used'])
 
+        inactive = db.execute(
+            'SELECT * FROM benefits WHERE card_id = ? AND active = 0 ORDER BY name',
+            (card['id'],)
+        ).fetchall()
+
         captured, max_possible = compute_card_roi(db, enriched)
         annual_fee = card['annual_fee'] or 0
         roi = {
@@ -236,7 +247,8 @@ def dashboard():
             'max_pct':       min(100, int(captured / max_possible * 100)) if max_possible > 0 else 0,
             'fee_tick_pct':  min(100, int(annual_fee / max_possible * 100)) if (annual_fee > 0 and max_possible > 0) else None,
         }
-        dashboard_cards.append({'card': dict(card), 'benefits': enriched, 'roi': roi})
+        dashboard_cards.append({'card': dict(card), 'benefits': enriched,
+                                'inactive': [dict(b) for b in inactive], 'roi': roi})
 
     total_captured = sum(dc['roi']['captured'] for dc in dashboard_cards)
     total_fees     = sum(dc['card']['annual_fee'] or 0 for dc in dashboard_cards)
@@ -366,12 +378,14 @@ def benefit_new(card_id):
         return redirect(url_for('cards_list'))
 
     if request.method == 'POST':
-        name            = request.form.get('name', '').strip()
-        description     = request.form.get('description', '').strip() or None
-        credit_amount   = request.form.get('credit_amount', '').strip() or None
-        period_type     = request.form.get('period_type', 'monthly')
-        is_subscription = 1 if request.form.get('is_subscription') else 0
-        reminder_days   = request.form.getlist('reminder_days')
+        name               = request.form.get('name', '').strip()
+        description        = request.form.get('description', '').strip() or None
+        credit_amount      = request.form.get('credit_amount', '').strip() or None
+        period_type        = request.form.get('period_type', 'monthly')
+        is_subscription    = 1 if request.form.get('is_subscription') else 0
+        subscription_start = request.form.get('subscription_start', '').strip() or None
+        subscription_end   = request.form.get('subscription_end', '').strip() or None
+        reminder_days      = request.form.getlist('reminder_days')
 
         if not name:
             flash('Name is required.', 'danger')
@@ -389,8 +403,9 @@ def benefit_new(card_id):
                                        period_labels=PERIOD_LABELS)
 
         cur = db.execute(
-            'INSERT INTO benefits (card_id, name, description, credit_amount, period_type, is_subscription) VALUES (?, ?, ?, ?, ?, ?)',
-            (card_id, name, description, credit_amount, period_type, is_subscription))
+            'INSERT INTO benefits (card_id, name, description, credit_amount, period_type, is_subscription, subscription_start, subscription_end) '
+            'VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+            (card_id, name, description, credit_amount, period_type, is_subscription, subscription_start, subscription_end))
         bid = cur.lastrowid
 
         for d in reminder_days:
@@ -431,13 +446,15 @@ def benefit_edit(id):
     card = db.execute('SELECT * FROM cards WHERE id = ?', (b['card_id'],)).fetchone()
 
     if request.method == 'POST':
-        name            = request.form.get('name', '').strip()
-        description     = request.form.get('description', '').strip() or None
-        credit_amount   = request.form.get('credit_amount', '').strip() or None
-        period_type     = request.form.get('period_type', 'monthly')
-        is_subscription = 1 if request.form.get('is_subscription') else 0
-        active          = 1 if request.form.get('active') else 0
-        reminder_days   = request.form.getlist('reminder_days')
+        name               = request.form.get('name', '').strip()
+        description        = request.form.get('description', '').strip() or None
+        credit_amount      = request.form.get('credit_amount', '').strip() or None
+        period_type        = request.form.get('period_type', 'monthly')
+        is_subscription    = 1 if request.form.get('is_subscription') else 0
+        subscription_start = request.form.get('subscription_start', '').strip() or None
+        subscription_end   = request.form.get('subscription_end', '').strip() or None
+        active             = 1 if request.form.get('active') else 0
+        reminder_days      = request.form.getlist('reminder_days')
 
         if not name:
             flash('Name is required.', 'danger')
@@ -455,8 +472,10 @@ def benefit_edit(id):
                                        benefit=b, period_labels=PERIOD_LABELS)
 
         db.execute(
-            'UPDATE benefits SET name=?, description=?, credit_amount=?, period_type=?, is_subscription=?, active=? WHERE id=?',
-            (name, description, credit_amount, period_type, is_subscription, active, id))
+            'UPDATE benefits SET name=?, description=?, credit_amount=?, period_type=?, is_subscription=?, '
+            'subscription_start=?, subscription_end=?, active=? WHERE id=?',
+            (name, description, credit_amount, period_type, is_subscription,
+             subscription_start, subscription_end, active, id))
 
         db.execute('DELETE FROM reminders WHERE benefit_id = ?', (id,))
         for d in reminder_days:
@@ -627,6 +646,17 @@ def benefit_redemptions(id):
         period_states[str(p_start)] = state
         check_date = p_start - timedelta(days=1)
     period_history.reverse()
+
+    # For subscriptions, hide periods that fall outside the active window from the bar chart.
+    if enriched['is_subscription']:
+        sub_start_raw = enriched.get('subscription_start')
+        sub_end_raw   = enriched.get('subscription_end')
+        sub_start = date.fromisoformat(sub_start_raw) if sub_start_raw else None
+        sub_end   = date.fromisoformat(sub_end_raw)   if sub_end_raw   else None
+        if sub_start:
+            period_history = [p for p in period_history if p['period_end'] >= sub_start]
+        if sub_end:
+            period_history = [p for p in period_history if p['period_start'] <= sub_end]
 
     # Group all redemptions by period_start
     from collections import defaultdict
