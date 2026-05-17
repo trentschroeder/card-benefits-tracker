@@ -16,20 +16,7 @@
     align-items: center;
     gap: 10px;
     padding: 12px 16px;
-    cursor: pointer;
-    user-select: none;
     border-bottom: 1px solid var(--border-color);
-    transition: background .12s;
-  }
-  .card-section-header:hover {
-    background: color-mix(in srgb, var(--bg-card) 90%, var(--text-primary) 10%);
-  }
-  .card-section.is-collapsed .card-section-header { border-bottom: none; }
-  .card-section-chevron {
-    color: var(--text-muted);
-    font-size: .8rem;
-    transition: transform .2s;
-    flex-shrink: 0;
   }
   .card-section-title {
     font-size: 1.05rem;
@@ -64,7 +51,6 @@
   }
   .card-section-edit:hover { background: var(--bg-input); color: var(--text-primary); }
   .card-section-body { padding: 12px 0 0; }
-  [data-theme="ai"] .card-section-header:hover { background: rgba(0,200,255,.05); }
 
   /* ── Benefit rows ──────────────────────────────────────── */
   .benefit-list {
@@ -263,10 +249,9 @@
 {% set pending = dc.benefits | selectattr('fully_used', 'false') | list %}
 {% set done    = dc.benefits | selectattr('fully_used') | list %}
 
-<div class="card-section mb-4" id="card-section-{{ card.id }}">
+<div class="card-section mb-4">
   <!-- Card header -->
-  <div class="card-section-header" onclick="toggleCard({{ card.id }})">
-    <i class="bi bi-chevron-down card-section-chevron" id="collapse-chevron-{{ card.id }}"></i>
+  <div class="card-section-header">
     <div class="card-section-title">
       <i class="bi bi-credit-card-2-front me-2 text-muted"></i>{{ card.name }}
     </div>
@@ -277,13 +262,12 @@
       <span>${{ roi.max_possible | int }} max</span>
     </div>
     {% endif %}
-    <a href="{{ url_for('card_detail', id=card.id) }}" class="card-section-edit"
-       onclick="event.stopPropagation()" title="Edit card">
+    <a href="{{ url_for('card_detail', id=card.id) }}" class="card-section-edit" title="Edit card">
       <i class="bi bi-pencil"></i>
     </a>
   </div>
 
-  <div class="card-section-body" id="card-body-{{ card.id }}">
+  <div class="card-section-body">
 
   <!-- ROI merged bar -->
   {% if roi.max_possible > 0 %}
@@ -479,30 +463,5 @@
     if (ch) ch.style.transform = open ? 'rotate(90deg)' : '';
   }
 
-  function toggleCard(id) {
-    var body    = document.getElementById('card-body-' + id);
-    var chevron = document.getElementById('collapse-chevron-' + id);
-    var section = document.getElementById('card-section-' + id);
-    var isHidden = body.style.display === 'none';
-    body.style.display = isHidden ? '' : 'none';
-    if (chevron) chevron.style.transform = isHidden ? '' : 'rotate(-90deg)';
-    if (section) section.classList.toggle('is-collapsed', !isHidden);
-    if (isHidden) localStorage.removeItem('cb-card-collapsed-' + id);
-    else          localStorage.setItem('cb-card-collapsed-' + id, '1');
-  }
-
-  // Restore collapsed state on page load
-  document.addEventListener('DOMContentLoaded', function () {
-    document.querySelectorAll('[id^="card-body-"]').forEach(function (body) {
-      var id = body.id.replace('card-body-', '');
-      if (localStorage.getItem('cb-card-collapsed-' + id)) {
-        body.style.display = 'none';
-        var ch = document.getElementById('collapse-chevron-' + id);
-        if (ch) ch.style.transform = 'rotate(-90deg)';
-        var sec = document.getElementById('card-section-' + id);
-        if (sec) sec.classList.add('is-collapsed');
-      }
-    });
-  });
 </script>
 {% endblock %}
