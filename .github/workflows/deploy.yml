@@ -39,16 +39,28 @@ jobs:
 
       - name: SSH and deploy
         uses: appleboy/ssh-action@v1.0.3
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
         with:
           host: 2.24.197.154
           username: root
           key: ${{ secrets.VPS_SSH_KEY }}
           script_stop: true
+          envs: EXPECTED_SHA
           script: |
+            set -euo pipefail
             cd /var/www/credit-card-benefits
-            git fetch
+            PRE_SHA=$(git rev-parse HEAD)
+            echo "Before fetch: HEAD=$PRE_SHA  expected=$EXPECTED_SHA"
+            git fetch origin main
             git reset --hard origin/main
+            POST_SHA=$(git rev-parse HEAD)
+            echo "After reset:  HEAD=$POST_SHA"
+            if [ "$POST_SHA" != "$EXPECTED_SHA" ]; then
+              echo "::error::HEAD after reset ($POST_SHA) does not match expected commit ($EXPECTED_SHA). Fetch likely no-op'd."
+              exit 1
+            fi
             ./venv/bin/pip install --quiet -r requirements.txt
             systemctl restart credit-card-benefits
             systemctl is-active --quiet credit-card-benefits
-            echo "Deploy OK $(date -u +%FT%TZ) — $(git rev-parse --short HEAD)"
+            echo "Deploy OK $(date -u +%FT%TZ) — $POST_SHA"
