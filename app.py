@@ -3,7 +3,7 @@ import sqlite3
 from datetime import date, timedelta
 
 from flask import (Flask, flash, jsonify, redirect, render_template,
-                   request, session, url_for)
+                   request, send_from_directory, session, url_for)
 from werkzeug.security import check_password_hash
 
 from periods import get_current_period, days_left, PERIOD_LABELS
@@ -183,6 +183,25 @@ def compute_card_roi(db, enriched_benefits):
             ).fetchone()
             captured += row['total']
     return captured, max_possible
+
+
+# ── Icon shims ────────────────────────────────────────────────────────────────
+# iOS Safari probes these root paths in addition to honoring the <link rel="apple-touch-icon">
+# tags. Serving them avoids 404s and lets older iOS pick up the home-screen icon.
+
+@app.route('/apple-touch-icon.png')
+@app.route('/apple-touch-icon-precomposed.png')
+@app.route('/apple-touch-icon-180x180.png')
+@app.route('/apple-touch-icon-180x180-precomposed.png')
+def apple_touch_icon():
+    return send_from_directory(os.path.join(BASE_DIR, 'static'),
+                               'icon-180.png', mimetype='image/png')
+
+
+@app.route('/favicon.ico')
+def favicon():
+    return send_from_directory(os.path.join(BASE_DIR, 'static'),
+                               'icon-192.png', mimetype='image/png')
 
 
 # ── Auth ───────────────────────────────────────────────────────────────────────
