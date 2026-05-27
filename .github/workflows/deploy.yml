@@ -1,0 +1,54 @@
+name: Deploy to VPS
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-vps
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: List repo secrets (names only)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        continue-on-error: true
+        run: |
+          echo "Repository secrets visible from API (names only, values stay private):"
+          gh api "repos/${{ github.repository }}/actions/secrets" --jq '.secrets[].name' || echo "(list call needed admin:read; non-fatal)"
+
+      - name: Sanity-check secret
+        env:
+          KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          BYTES=$(printf '%s' "$KEY" | wc -c)
+          echo "VPS_SSH_KEY byte length: $BYTES"
+          if [ "$BYTES" -lt 300 ]; then
+            echo "::error::VPS_SSH_KEY is $BYTES bytes; expected ~400. The secret is empty or wrong. See instructions in chat."
+            exit 1
+          fi
+          if ! printf '%s' "$KEY" | head -1 | grep -q '^-----BEGIN'; then
+            echo "::error::VPS_SSH_KEY doesn't start with '-----BEGIN'. Make sure you pasted from the first dash of the BEGIN line."
+            exit 1
+          fi
+          echo "Secret looks valid; proceeding to SSH."
+
+      - name: SSH and deploy
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: 2.24.197.154
+          username: root
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script_stop: true
+          script: |
+            cd /var/www/credit-card-benefits
+            git fetch
+            git reset --hard origin/main
+            ./venv/bin/pip install --quiet -r requirements.txt
+            systemctl restart credit-card-benefits
+            systemctl is-active --quiet credit-card-benefits
+            echo "Deploy OK $(date -u +%FT%TZ) — $(git rev-parse --short HEAD)"
