@@ -2,8 +2,20 @@
 <html lang="en" data-theme="ai">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>{% block title %}Card Benefits{% endblock %}</title>
+
+  <!-- PWA / iOS web-app -->
+  <link rel="manifest" href="{{ url_for('static', filename='manifest.webmanifest') }}">
+  <meta name="theme-color" content="#04040f" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#1a3c8a" media="(prefers-color-scheme: light)">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Benefits">
+  <link rel="apple-touch-icon" href="{{ url_for('static', filename='icon.svg') }}">
+  <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='icon.svg') }}">
+
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
   <style>
@@ -468,6 +480,210 @@
       0%, 100% { box-shadow: 0 0 10px rgba(255,120,0,.2), var(--card-shadow); }
       50%       { box-shadow: 0 0 20px rgba(255,120,0,.4), var(--card-shadow); }
     }
+
+    /* ═══════════════════════════════════════════════════════════
+       Mobile / iOS-native interface (<= 768px)
+       ═══════════════════════════════════════════════════════════ */
+
+    /* Bottom tab bar is hidden by default; shown only on mobile */
+    .mobile-tabbar { display: none; }
+
+    @media (max-width: 768px) {
+      :root {
+        --safe-top:    env(safe-area-inset-top, 0px);
+        --safe-bottom: env(safe-area-inset-bottom, 0px);
+        --safe-left:   env(safe-area-inset-left, 0px);
+        --safe-right:  env(safe-area-inset-right, 0px);
+        --tabbar-h:    56px;
+      }
+
+      html, body {
+        -webkit-text-size-adjust: 100%;
+        -webkit-tap-highlight-color: transparent;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+      }
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI",
+                     Roboto, "Helvetica Neue", Arial, sans-serif !important;
+        font-size: 15px;
+        /* Leave room for the bottom tab bar + iPhone home indicator */
+        padding-bottom: calc(var(--tabbar-h) + var(--safe-bottom) + 8px) !important;
+        padding-left:  var(--safe-left);
+        padding-right: var(--safe-right);
+      }
+
+      /* Compact top header — keep brand + theme toggle, hide nav links */
+      .navbar {
+        position: sticky;
+        top: 0;
+        z-index: 1029;
+        padding-top:    calc(.4rem + var(--safe-top)) !important;
+        padding-bottom: .4rem !important;
+        backdrop-filter: blur(20px);
+        -webkit-backdrop-filter: blur(20px);
+        background: color-mix(in srgb, var(--nav-bg) 88%, transparent) !important;
+      }
+      .navbar .navbar-toggler { display: none !important; }
+      .navbar .collapse.navbar-collapse {
+        display: flex !important;
+        flex-basis: auto;
+        flex-grow: 0;
+      }
+      /* On mobile, only the theme toggle stays in the top bar */
+      .navbar .nav-item:not(.theme-toggle-item) { display: none !important; }
+      .navbar .theme-toggle { margin-left: 0; }
+      .navbar-brand { font-size: 1.05rem; }
+
+      /* Container — tighter side gutters, native-feel spacing */
+      .container-lg {
+        padding-left:  14px;
+        padding-right: 14px;
+      }
+
+      /* iOS card aesthetic */
+      .card {
+        border-radius: 14px !important;
+        margin-bottom: 12px;
+      }
+      .card .card-body { padding: 14px 16px; }
+
+      /* Larger, finger-friendly touch targets */
+      .btn,
+      .form-control,
+      .form-select {
+        min-height: 44px;
+        font-size: 16px; /* prevents iOS auto-zoom on focus */
+        border-radius: 10px !important;
+      }
+      .btn-sm { min-height: 36px; font-size: 14px; }
+      .btn-group .btn { border-radius: 0 !important; }
+      .btn-group > .btn:first-child { border-top-left-radius: 10px !important; border-bottom-left-radius: 10px !important; }
+      .btn-group > .btn:last-child  { border-top-right-radius: 10px !important; border-bottom-right-radius: 10px !important; }
+
+      /* Larger checkboxes/switches */
+      .form-check-input { width: 1.2em; height: 1.2em; }
+      .form-switch .form-check-input { width: 2.4em; height: 1.3em; }
+
+      /* Tables get more breathing room */
+      .table > :not(caption) > * > * { padding: .65rem .5rem; }
+
+      /* Headings sized for mobile */
+      h1 { font-size: 1.6rem; }
+      h2 { font-size: 1.35rem; }
+      h3 { font-size: 1.2rem; }
+
+      /* ── Bottom tab bar ─────────────────────────────────────── */
+      .mobile-tabbar {
+        display: flex;
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        z-index: 1030;
+        justify-content: space-around;
+        align-items: stretch;
+        gap: 0;
+        padding: 6px 4px calc(6px + var(--safe-bottom));
+        background: color-mix(in srgb, var(--nav-bg) 92%, transparent);
+        border-top: 1px solid var(--border-color);
+        backdrop-filter: blur(20px);
+        -webkit-backdrop-filter: blur(20px);
+      }
+      [data-theme="ai"] .mobile-tabbar {
+        box-shadow: 0 -8px 24px rgba(0,100,255,.18);
+      }
+      .mobile-tabbar .tab-item {
+        flex: 1 1 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 2px;
+        color: var(--text-muted);
+        text-decoration: none;
+        font-size: 10px;
+        font-weight: 500;
+        line-height: 1.1;
+        padding: 4px 2px;
+        min-height: 44px;
+        border-radius: 10px;
+        transition: color .15s, background .15s, transform .1s;
+      }
+      .mobile-tabbar .tab-item i {
+        font-size: 22px;
+        line-height: 1;
+        margin-bottom: 1px;
+      }
+      .mobile-tabbar .tab-item:active { transform: scale(.94); }
+      .mobile-tabbar .tab-item.active { color: var(--text-nav-hover); }
+      [data-theme="ai"] .mobile-tabbar .tab-item.active {
+        color: #00e5ff;
+        text-shadow: 0 0 8px rgba(0,229,255,.6);
+      }
+
+      /* ── Sheet-style modals ─────────────────────────────────── */
+      .modal.fade .modal-dialog {
+        transform: translateY(100%);
+        transition: transform .3s cubic-bezier(.32,.72,0,1);
+        margin: 0;
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        max-width: 100%;
+        width: 100%;
+      }
+      .modal.show .modal-dialog { transform: translateY(0); }
+      .modal-content {
+        border-radius: 16px 16px 0 0 !important;
+        border-bottom: none !important;
+        padding-top: 14px;
+        padding-bottom: calc(var(--safe-bottom) + 8px);
+        max-height: 90vh;
+      }
+      /* Drag-handle pill */
+      .modal-content::before {
+        content: '';
+        position: absolute;
+        top: 6px;
+        left: 50%;
+        transform: translateX(-50%);
+        width: 38px;
+        height: 5px;
+        border-radius: 3px;
+        background: color-mix(in srgb, var(--text-muted) 50%, transparent);
+        pointer-events: none;
+      }
+      .modal-header {
+        border-bottom: 1px solid var(--border-color);
+        padding: .5rem 1rem .75rem;
+      }
+      .modal-header .modal-title { font-weight: 600; font-size: 1.05rem; }
+      .modal-body  { padding: 1rem; overflow-y: auto; }
+      .modal-footer {
+        padding: .75rem 1rem calc(.75rem + var(--safe-bottom));
+        gap: .5rem;
+      }
+      .modal-footer .btn { flex: 1; }
+
+      /* Full-screen-ish dialogs already use modal-fullscreen-sm-down — leave those */
+      .modal-fullscreen-sm-down .modal-content {
+        border-radius: 0 !important;
+        padding-top: var(--safe-top);
+      }
+      .modal-fullscreen-sm-down .modal-content::before { display: none; }
+
+      /* Toast position — push below the sticky top bar */
+      .toast-container.flash-toasts {
+        top: calc(var(--safe-top) + 8px) !important;
+      }
+    }
+
+    /* Body shouldn't bounce-scroll the tab bar away on iOS standalone PWA */
+    @media (display-mode: standalone) {
+      body { overscroll-behavior-y: contain; }
+    }
   </style>
   <!-- Apply saved theme before paint to prevent flash -->
   <script>
@@ -514,7 +730,7 @@
           </a>
         </li>
         {% endif %}
-        <li class="nav-item ms-1">
+        <li class="nav-item theme-toggle-item ms-1">
           <div class="theme-toggle">
             <button class="theme-btn" id="btn-light" onclick="setTheme('light')" title="Light">
               <i class="bi bi-sun-fill"></i>
@@ -535,6 +751,31 @@
 <div class="container-lg">
   {% block content %}{% endblock %}
 </div>
+
+<!-- iOS-style bottom tab bar (mobile only — desktop hides via CSS) -->
+<nav class="mobile-tabbar" role="navigation" aria-label="Primary">
+  <a class="tab-item {% if request.path == '/' %}active{% endif %}"
+     href="{{ url_for('dashboard') }}">
+    <i class="bi bi-speedometer2"></i>
+    <span>Dashboard</span>
+  </a>
+  <a class="tab-item {% if request.path.startswith('/cards') %}active{% endif %}"
+     href="{{ url_for('cards_list') }}">
+    <i class="bi bi-credit-card"></i>
+    <span>Cards</span>
+  </a>
+  <a class="tab-item {% if request.path == '/settings' %}active{% endif %}"
+     href="{{ url_for('settings') }}">
+    <i class="bi bi-gear"></i>
+    <span>Settings</span>
+  </a>
+  {% if session.get('logged_in') %}
+  <a class="tab-item" href="{{ url_for('logout') }}">
+    <i class="bi bi-box-arrow-right"></i>
+    <span>Logout</span>
+  </a>
+  {% endif %}
+</nav>
 
 {% with messages = get_flashed_messages(with_categories=true) %}
   {% if messages %}
