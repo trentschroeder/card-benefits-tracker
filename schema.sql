@@ -15,8 +15,6 @@ CREATE TABLE IF NOT EXISTS benefits (
     credit_amount       REAL,
     period_type         TEXT    NOT NULL CHECK(period_type IN ('monthly','quarterly','semi-annual','annual')),
     is_subscription     INTEGER NOT NULL DEFAULT 0,
-    subscription_start  DATE,
-    subscription_end    DATE,
     active              INTEGER NOT NULL DEFAULT 1,
     created_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (card_id) REFERENCES cards(id) ON DELETE CASCADE

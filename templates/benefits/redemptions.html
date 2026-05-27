@@ -26,16 +26,6 @@
     gap: 4px;
     cursor: default;
   }
-  .util-period.is-inactive { opacity: .35; }
-  .util-period.is-inactive .util-bar-wrap {
-    background-image: repeating-linear-gradient(
-      45deg,
-      transparent 0,
-      transparent 4px,
-      rgba(0,0,0,.06) 4px,
-      rgba(0,0,0,.06) 8px
-    );
-  }
   .util-bar-wrap {
     position: relative;
     height: 48px;
@@ -170,23 +160,10 @@
           <div class="p-3 rounded" style="background: color-mix(in srgb, var(--bg-card) 92%, var(--text-primary) 8%);">
             <div class="form-check form-switch mb-0">
               <input name="is_subscription" type="checkbox" class="form-check-input" id="editIsSubscription"
-                     role="switch" {% if benefit.is_subscription %}checked{% endif %}
-                     onchange="document.getElementById('editSubscriptionDates').classList.toggle('d-none', !this.checked);">
+                     role="switch" {% if benefit.is_subscription %}checked{% endif %}>
               <label class="form-check-label" for="editIsSubscription">
-                <i class="bi bi-arrow-repeat me-1"></i>Subscription (auto-mark used each period)
+                <i class="bi bi-arrow-repeat me-1"></i>Subscription (auto-record a redemption each period)
               </label>
-            </div>
-            <div id="editSubscriptionDates" class="row g-2 mt-2 {% if not benefit.is_subscription %}d-none{% endif %}">
-              <div class="col-sm-6">
-                <label class="form-label small mb-1">Subscription start</label>
-                <input name="subscription_start" type="date" class="form-control form-control-sm"
-                       value="{{ benefit.subscription_start or '' }}">
-              </div>
-              <div class="col-sm-6">
-                <label class="form-label small mb-1">Subscription end</label>
-                <input name="subscription_end" type="date" class="form-control form-control-sm"
-                       value="{{ benefit.subscription_end or '' }}">
-              </div>
             </div>
           </div>
         </div>
@@ -234,10 +211,7 @@
   <div class="mb-4 pb-3" style="border-bottom:1px solid var(--border-color);">
   <div class="util-timeline">
     {% for p in period_history %}
-      {% if p.state == 'inactive' %}
-        {% set pct = 0 %}
-        {% set tip = p.period_start.strftime('%b %Y') ~ ' · Inactive (outside subscription window)' %}
-      {% elif benefit.credit_amount %}
+      {% if benefit.credit_amount %}
         {% set pct = ((p.amount_used / benefit.credit_amount) * 100) if benefit.credit_amount else 0 %}
         {% if pct > 100 %}{% set pct = 100 %}{% endif %}
         {% set tip = p.period_start.strftime('%b %Y') ~ ' · $' ~ '%.2f'|format(p.amount_used) ~ ' / $' ~ '%.2f'|format(benefit.credit_amount) %}
@@ -255,7 +229,7 @@
         {% set label = p.period_start.year %}
       {% endif %}
       {% set is_current = loop.last %}
-      <div class="util-period {{ 'is-current' if is_current }}{{ ' is-inactive' if p.state == 'inactive' }}"
+      <div class="util-period {{ 'is-current' if is_current }}"
            data-bs-toggle="tooltip" title="{{ tip }}">
         <div class="util-bar-wrap">
           <div class="util-bar util-bar-{{ p.state }}" style="height: {{ pct }}%;"></div>

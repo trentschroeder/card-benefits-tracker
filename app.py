@@ -81,13 +81,60 @@ def init_db():
         db.commit()
     except Exception:
         pass
+    _migrate_subscriptions_to_redemptions(db)
+    db.close()
+
+
+def _migrate_subscriptions_to_redemptions(db):
+    """One-time backfill: convert subscription_start/end columns into per-period
+    redemption rows, then drop the columns. Idempotent — does nothing once the
+    columns are gone."""
+    cols = {r[1] for r in db.execute('PRAGMA table_info(benefits)').fetchall()}
+    if 'subscription_start' not in cols and 'subscription_end' not in cols:
+        return
+
+    rows = db.execute(
+        'SELECT id, credit_amount, period_type, subscription_start, subscription_end '
+        'FROM benefits WHERE is_subscription = 1 AND subscription_start IS NOT NULL'
+    ).fetchall()
+    today = date.today()
+    for r in rows:
+        try:
+            sub_start = date.fromisoformat(r['subscription_start'])
+        except (TypeError, ValueError):
+            continue
+        sub_end = None
+        if r['subscription_end']:
+            try:
+                sub_end = date.fromisoformat(r['subscription_end'])
+            except ValueError:
+                pass
+        through = min(sub_end, today) if sub_end else today
+        cursor = sub_start
+        while cursor <= through:
+            p_start, p_end = get_current_period(r['period_type'], for_date=cursor)
+            existing = db.execute(
+                'SELECT 1 FROM redemptions WHERE benefit_id = ? AND period_start = ?',
+                (r['id'], str(p_start))
+            ).fetchone()
+            if not existing:
+                db.execute(
+                    'INSERT INTO redemptions (benefit_id, period_start, amount, notes) '
+                    'VALUES (?, ?, ?, ?)',
+                    (r['id'], str(p_start), r['credit_amount'], 'subscription')
+                )
+            cursor = p_end + timedelta(days=1)
+        # If the subscription has already ended in the past, turn off the flag
+        # so the scheduler doesn't keep auto-renewing it.
+        if sub_end and sub_end < today:
+            db.execute('UPDATE benefits SET is_subscription = 0 WHERE id = ?', (r['id'],))
+
     for col in ('subscription_start', 'subscription_end'):
         try:
-            db.execute(f'ALTER TABLE benefits ADD COLUMN {col} DATE')
-            db.commit()
+            db.execute(f'ALTER TABLE benefits DROP COLUMN {col}')
         except Exception:
             pass
-    db.close()
+    db.commit()
 
 
 init_db()
@@ -104,39 +151,54 @@ def set_setting(db, key, value):
     db.execute('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)', (key, value))
 
 
+def ensure_subscription_redemption(db, benefit):
+    """For an active subscription benefit, make sure a redemption exists for the
+    current period. Idempotent. Caller is responsible for db.commit()."""
+    if not benefit['is_subscription'] or not benefit['active']:
+        return
+    period_start, _ = get_current_period(benefit['period_type'])
+    existing = db.execute(
+        'SELECT 1 FROM redemptions WHERE benefit_id = ? AND period_start = ?',
+        (benefit['id'], str(period_start))
+    ).fetchone()
+    if not existing:
+        db.execute(
+            'INSERT INTO redemptions (benefit_id, period_start, amount, notes) '
+            'VALUES (?, ?, ?, ?)',
+            (benefit['id'], str(period_start), benefit['credit_amount'], 'subscription')
+        )
+        db.commit()
+
+
 def enrich_benefit(db, benefit):
     """Add period info and usage totals to a benefit row dict."""
     b = dict(benefit)
+    if b.get('is_subscription'):
+        ensure_subscription_redemption(db, b)
     period_start, period_end = get_current_period(b['period_type'])
     b['period_start'] = period_start
     b['period_end']   = period_end
     b['days_left']    = days_left(period_end)
     b['period_label'] = PERIOD_LABELS[b['period_type']]
 
-    if b.get('is_subscription'):
-        b['amount_used'] = b['credit_amount'] or 0
-        b['remaining']   = 0
-        b['pct_used']    = 100
-        b['fully_used']  = True
-    else:
-        rows = db.execute(
-            'SELECT COALESCE(SUM(amount), 0) AS total FROM redemptions WHERE benefit_id = ? AND period_start = ?',
-            (b['id'], str(period_start))
-        ).fetchone()
-        b['amount_used'] = rows['total']
+    rows = db.execute(
+        'SELECT COALESCE(SUM(amount), 0) AS total FROM redemptions WHERE benefit_id = ? AND period_start = ?',
+        (b['id'], str(period_start))
+    ).fetchone()
+    b['amount_used'] = rows['total']
 
-        if b['credit_amount']:
-            b['remaining'] = max(0.0, b['credit_amount'] - b['amount_used'])
-            b['pct_used']  = min(100, int((b['amount_used'] / b['credit_amount']) * 100))
-            b['fully_used'] = b['remaining'] <= 0
-        else:
-            count = db.execute(
-                'SELECT COUNT(*) FROM redemptions WHERE benefit_id = ? AND period_start = ?',
-                (b['id'], str(period_start))
-            ).fetchone()[0]
-            b['remaining']  = 0 if count > 0 else 1
-            b['pct_used']   = 100 if count > 0 else 0
-            b['fully_used'] = count > 0
+    if b['credit_amount']:
+        b['remaining'] = max(0.0, b['credit_amount'] - b['amount_used'])
+        b['pct_used']  = min(100, int((b['amount_used'] / b['credit_amount']) * 100))
+        b['fully_used'] = b['remaining'] <= 0
+    else:
+        count = db.execute(
+            'SELECT COUNT(*) FROM redemptions WHERE benefit_id = ? AND period_start = ?',
+            (b['id'], str(period_start))
+        ).fetchone()[0]
+        b['remaining']  = 0 if count > 0 else 1
+        b['pct_used']   = 100 if count > 0 else 0
+        b['fully_used'] = count > 0
 
     reminders = db.execute(
         'SELECT days_before FROM reminders WHERE benefit_id = ? ORDER BY days_before DESC',
@@ -150,18 +212,6 @@ def enrich_benefit(db, benefit):
 _PERIODS_PER_YEAR = {'monthly': 12, 'quarterly': 4, 'semi-annual': 2, 'annual': 1}
 
 
-def _periods_elapsed_this_year(period_type):
-    today = date.today()
-    if period_type == 'monthly':
-        return today.month
-    elif period_type == 'quarterly':
-        return (today.month - 1) // 3 + 1
-    elif period_type == 'semi-annual':
-        return (today.month - 1) // 6 + 1
-    else:
-        return 1
-
-
 def compute_card_roi(db, enriched_benefits):
     """Return (captured, max_possible) for a card's benefits this calendar year."""
     year = str(date.today().year)
@@ -173,15 +223,12 @@ def compute_card_roi(db, enriched_benefits):
         ca = b['credit_amount']
         ppy = _PERIODS_PER_YEAR.get(b['period_type'], 1)
         max_possible += ca * ppy
-        if b.get('is_subscription'):
-            captured += ca * _periods_elapsed_this_year(b['period_type'])
-        else:
-            row = db.execute(
-                "SELECT COALESCE(SUM(amount), 0) AS total FROM redemptions "
-                "WHERE benefit_id = ? AND strftime('%Y', period_start) = ?",
-                (b['id'], year)
-            ).fetchone()
-            captured += row['total']
+        row = db.execute(
+            "SELECT COALESCE(SUM(amount), 0) AS total FROM redemptions "
+            "WHERE benefit_id = ? AND strftime('%Y', period_start) = ?",
+            (b['id'], year)
+        ).fetchone()
+        captured += row['total']
     return captured, max_possible
 
 
@@ -402,8 +449,6 @@ def benefit_new(card_id):
         credit_amount      = request.form.get('credit_amount', '').strip() or None
         period_type        = request.form.get('period_type', 'monthly')
         is_subscription    = 1 if request.form.get('is_subscription') else 0
-        subscription_start = request.form.get('subscription_start', '').strip() or None
-        subscription_end   = request.form.get('subscription_end', '').strip() or None
         reminder_days      = request.form.getlist('reminder_days')
 
         if not name:
@@ -422,9 +467,9 @@ def benefit_new(card_id):
                                        period_labels=PERIOD_LABELS)
 
         cur = db.execute(
-            'INSERT INTO benefits (card_id, name, description, credit_amount, period_type, is_subscription, subscription_start, subscription_end) '
-            'VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-            (card_id, name, description, credit_amount, period_type, is_subscription, subscription_start, subscription_end))
+            'INSERT INTO benefits (card_id, name, description, credit_amount, period_type, is_subscription) '
+            'VALUES (?, ?, ?, ?, ?, ?)',
+            (card_id, name, description, credit_amount, period_type, is_subscription))
         bid = cur.lastrowid
 
         for d in reminder_days:
@@ -444,6 +489,9 @@ def benefit_new(card_id):
                 pass
 
         db.commit()
+        if is_subscription:
+            new_row = db.execute('SELECT * FROM benefits WHERE id = ?', (bid,)).fetchone()
+            ensure_subscription_redemption(db, new_row)
         db.close()
         flash(f'Benefit "{name}" added.', 'success')
         return redirect(url_for('card_detail', id=card_id))
@@ -470,8 +518,6 @@ def benefit_edit(id):
         credit_amount      = request.form.get('credit_amount', '').strip() or None
         period_type        = request.form.get('period_type', 'monthly')
         is_subscription    = 1 if request.form.get('is_subscription') else 0
-        subscription_start = request.form.get('subscription_start', '').strip() or None
-        subscription_end   = request.form.get('subscription_end', '').strip() or None
         active             = 1 if request.form.get('active') else 0
         reminder_days      = request.form.getlist('reminder_days')
 
@@ -492,9 +538,8 @@ def benefit_edit(id):
 
         db.execute(
             'UPDATE benefits SET name=?, description=?, credit_amount=?, period_type=?, is_subscription=?, '
-            'subscription_start=?, subscription_end=?, active=? WHERE id=?',
-            (name, description, credit_amount, period_type, is_subscription,
-             subscription_start, subscription_end, active, id))
+            'active=? WHERE id=?',
+            (name, description, credit_amount, period_type, is_subscription, active, id))
 
         db.execute('DELETE FROM reminders WHERE benefit_id = ?', (id,))
         for d in reminder_days:
@@ -513,6 +558,9 @@ def benefit_edit(id):
                 pass
 
         db.commit()
+        if is_subscription and active:
+            updated = db.execute('SELECT * FROM benefits WHERE id = ?', (id,)).fetchone()
+            ensure_subscription_redemption(db, updated)
         card_id = b['card_id']
         db.close()
         flash(f'Benefit "{name}" updated.', 'success')
@@ -642,33 +690,20 @@ def benefit_redemptions(id):
     period_history = []
     period_states  = {}
     check_date = date.today()
-    sub_start = date.fromisoformat(enriched['subscription_start']) if enriched.get('subscription_start') else None
-    sub_end   = date.fromisoformat(enriched['subscription_end'])   if enriched.get('subscription_end')   else None
     for _ in range(_n_map.get(enriched['period_type'], 1)):
         p_start, p_end = get_current_period(enriched['period_type'], for_date=check_date)
-        if enriched['is_subscription']:
-            in_window = True
-            if sub_start and p_end < sub_start:   in_window = False
-            if sub_end   and p_start > sub_end:   in_window = False
-            if in_window:
-                state       = 'full'
-                amount_used = enriched['credit_amount'] or 0.0
-            else:
-                state       = 'inactive'
-                amount_used = 0.0
+        pr = db.execute(
+            'SELECT COALESCE(SUM(amount),0) AS total, COUNT(*) AS cnt '
+            'FROM redemptions WHERE benefit_id=? AND period_start=?',
+            (enriched['id'], str(p_start))
+        ).fetchone()
+        amount_used = float(pr['total'])
+        if enriched['credit_amount']:
+            if amount_used >= enriched['credit_amount']:   state = 'full'
+            elif amount_used > 0:                          state = 'partial'
+            else:                                          state = 'none'
         else:
-            pr = db.execute(
-                'SELECT COALESCE(SUM(amount),0) AS total, COUNT(*) AS cnt '
-                'FROM redemptions WHERE benefit_id=? AND period_start=?',
-                (enriched['id'], str(p_start))
-            ).fetchone()
-            amount_used = float(pr['total'])
-            if enriched['credit_amount']:
-                if amount_used >= enriched['credit_amount']:   state = 'full'
-                elif amount_used > 0:                          state = 'partial'
-                else:                                          state = 'none'
-            else:
-                state = 'full' if pr['cnt'] > 0 else 'none'
+            state = 'full' if pr['cnt'] > 0 else 'none'
         period_history.append({'period_start': p_start, 'period_end': p_end,
                                 'amount_used': amount_used, 'state': state})
         period_states[str(p_start)] = state
@@ -845,17 +880,11 @@ def _run_reminder_check(force=False):
     and today is N days before period_end (matching a configured reminder),
     send an email. Returns count of benefits included in the email.
     force=True bypasses the "already sent" dedup check.
+    Also rolls active subscriptions forward into the current period.
     """
     db = get_db()
     gmail_user = get_setting(db, 'gmail_user')
     gmail_pass = get_setting(db, 'gmail_app_password')
-
-    if not all([gmail_user, gmail_pass]):
-        db.close()
-        return 0
-
-    today = date.today()
-    benefits_due = []
 
     raw = db.execute('''
         SELECT b.*, c.name AS card_name, c.owner_email
@@ -863,6 +892,17 @@ def _run_reminder_check(force=False):
         JOIN cards c ON c.id = b.card_id
         WHERE b.active = 1 AND c.active = 1
     ''').fetchall()
+
+    for row in raw:
+        if row['is_subscription']:
+            ensure_subscription_redemption(db, row)
+
+    if not all([gmail_user, gmail_pass]):
+        db.close()
+        return 0
+
+    today = date.today()
+    benefits_due = []
 
     for row in raw:
         b = enrich_benefit(db, row)
