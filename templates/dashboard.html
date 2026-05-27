@@ -495,18 +495,15 @@
       </div>
     {% endfor %}
 
-    <!-- Done / subscription benefits (collapsed) -->
+    <!-- Done benefits (collapsed) -->
     {% if done %}
     <div class="done-footer" onclick="toggleDone('done-{{ card.id }}')" id="done-toggle-{{ card.id }}">
       <i class="bi bi-chevron-right" id="done-chevron-{{ card.id }}" style="font-size:.65rem; transition:transform .2s;"></i>
-      {% set n_auto = done | selectattr('is_subscription') | list | length %}
-      {% set n_done = done | length - n_auto %}
-      {% if n_done > 0 %}<span><i class="bi bi-check-circle-fill text-success me-1"></i>{{ n_done }} done</span>{% endif %}
-      {% if n_auto > 0 %}<span><i class="bi bi-arrow-repeat text-success me-1"></i>{{ n_auto }} auto</span>{% endif %}
+      <span><i class="bi bi-check-circle-fill text-success me-1"></i>{{ done | length }} done</span>
     </div>
     <div class="done-section" id="done-{{ card.id }}" style="display:none;">
       {% for b in done %}
-        {% set badge_label = 'Auto' if b.is_subscription else 'Done' %}
+        {% set badge_label = 'Done' %}
         <div class="benefit-row done-row">
           <span class="row-dot" style="background:#198754;"></span>
           <a href="{{ url_for('benefit_redemptions', id=b.id) }}" class="row-name text-muted fw-normal"
@@ -580,6 +577,58 @@
       </div>
       <form method="post" action="{{ url_for('benefit_redeem', id=b.id) }}">
         <div class="modal-body">
+          {% if b.is_subscription %}
+          {% if b.credit_amount %}
+          <div class="mb-3">
+            <label class="form-label">Amount per period ($)</label>
+            <input name="amount" type="number" step="0.01" min="0.01" class="form-control"
+                   value="{{ '%.2f'|format(b.credit_amount) }}">
+          </div>
+          {% endif %}
+          <div class="mb-3">
+            <label class="form-label">Notes (optional)</label>
+            <input name="notes" type="text" class="form-control" placeholder="e.g. Started subscription">
+          </div>
+          <label class="form-label">From (optional)</label>
+          <div class="row g-2 mb-2">
+            <div class="col-7">
+              <select name="redemption_start_month" class="form-select">
+                <option value="">Month</option>
+                {% for m, name in [(1,'January'),(2,'February'),(3,'March'),(4,'April'),(5,'May'),(6,'June'),(7,'July'),(8,'August'),(9,'September'),(10,'October'),(11,'November'),(12,'December')] %}
+                  <option value="{{ '%02d'|format(m) }}">{{ name }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-5">
+              <select name="redemption_start_year" class="form-select">
+                <option value="">Year</option>
+                {% for y in range(today().year - 5, today().year + 3) %}
+                  <option value="{{ y }}">{{ y }}</option>
+                {% endfor %}
+              </select>
+            </div>
+          </div>
+          <label class="form-label">Through (optional)</label>
+          <div class="row g-2">
+            <div class="col-7">
+              <select name="redemption_end_month" class="form-select">
+                <option value="">Month</option>
+                {% for m, name in [(1,'January'),(2,'February'),(3,'March'),(4,'April'),(5,'May'),(6,'June'),(7,'July'),(8,'August'),(9,'September'),(10,'October'),(11,'November'),(12,'December')] %}
+                  <option value="{{ '%02d'|format(m) }}">{{ name }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-5">
+              <select name="redemption_end_year" class="form-select">
+                <option value="">Year</option>
+                {% for y in range(today().year - 5, today().year + 3) %}
+                  <option value="{{ y }}">{{ y }}</option>
+                {% endfor %}
+              </select>
+            </div>
+          </div>
+          <div class="form-text mt-2">Leave blank to record the current period. Pick a month range to backfill past or future periods — one row per period.</div>
+          {% else %}
           {% if b.credit_amount %}
           <div class="mb-3">
             <label class="form-label">Amount Used ($)</label>
@@ -599,6 +648,7 @@
                    value="{{ today().isoformat() }}" style="max-width:160px;">
             <div class="form-text">Change to record a past redemption.</div>
           </div>
+          {% endif %}
         </div>
         <div class="modal-footer py-2">
           <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>

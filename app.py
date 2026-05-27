@@ -82,7 +82,22 @@ def init_db():
     except Exception:
         pass
     _migrate_subscriptions_to_redemptions(db)
+    _drop_last_subscription_period_if_exists(db)
     db.close()
+
+
+def _drop_last_subscription_period_if_exists(db):
+    """Cleanup: the auto-create-redemption-on-render behavior was reverted,
+    so the marker column is no longer needed. Drop it if a prior version
+    of this app added it."""
+    cols = {r[1] for r in db.execute('PRAGMA table_info(benefits)').fetchall()}
+    if 'last_subscription_period' not in cols:
+        return
+    try:
+        db.execute('ALTER TABLE benefits DROP COLUMN last_subscription_period')
+        db.commit()
+    except Exception:
+        pass
 
 
 def _migrate_subscriptions_to_redemptions(db):
@@ -151,30 +166,9 @@ def set_setting(db, key, value):
     db.execute('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)', (key, value))
 
 
-def ensure_subscription_redemption(db, benefit):
-    """For an active subscription benefit, make sure a redemption exists for the
-    current period. Idempotent. Caller is responsible for db.commit()."""
-    if not benefit['is_subscription'] or not benefit['active']:
-        return
-    period_start, _ = get_current_period(benefit['period_type'])
-    existing = db.execute(
-        'SELECT 1 FROM redemptions WHERE benefit_id = ? AND period_start = ?',
-        (benefit['id'], str(period_start))
-    ).fetchone()
-    if not existing:
-        db.execute(
-            'INSERT INTO redemptions (benefit_id, period_start, amount, notes) '
-            'VALUES (?, ?, ?, ?)',
-            (benefit['id'], str(period_start), benefit['credit_amount'], 'subscription')
-        )
-        db.commit()
-
-
 def enrich_benefit(db, benefit):
     """Add period info and usage totals to a benefit row dict."""
     b = dict(benefit)
-    if b.get('is_subscription'):
-        ensure_subscription_redemption(db, b)
     period_start, period_end = get_current_period(b['period_type'])
     b['period_start'] = period_start
     b['period_end']   = period_end
@@ -489,9 +483,6 @@ def benefit_new(card_id):
                 pass
 
         db.commit()
-        if is_subscription:
-            new_row = db.execute('SELECT * FROM benefits WHERE id = ?', (bid,)).fetchone()
-            ensure_subscription_redemption(db, new_row)
         db.close()
         flash(f'Benefit "{name}" added.', 'success')
         return redirect(url_for('card_detail', id=card_id))
@@ -558,9 +549,6 @@ def benefit_edit(id):
                 pass
 
         db.commit()
-        if is_subscription and active:
-            updated = db.execute('SELECT * FROM benefits WHERE id = ?', (id,)).fetchone()
-            ensure_subscription_redemption(db, updated)
         card_id = b['card_id']
         db.close()
         flash(f'Benefit "{name}" updated.', 'success')
@@ -602,6 +590,59 @@ def benefit_redeem(id):
         db.close()
         return jsonify({'error': 'Not found'}), 404
 
+    notes = request.form.get('notes', '').strip() or None
+
+    if b['is_subscription']:
+        today = date.today()
+        def _ym(month_key, year_key):
+            m = request.form.get(month_key, '').strip()
+            y = request.form.get(year_key, '').strip()
+            if not m or not y:
+                return None
+            try:
+                return date(int(y), int(m), 1)
+            except (ValueError, TypeError):
+                return None
+        start_date = _ym('redemption_start_month', 'redemption_start_year') or today
+        end_date   = _ym('redemption_end_month',   'redemption_end_year')   or today
+        if start_date > end_date:
+            db.close()
+            flash('Start month must be on or before end month.', 'danger')
+            return redirect(request.referrer or url_for('dashboard'))
+
+        amount_str = request.form.get('amount', '').strip()
+        if amount_str:
+            try:
+                row_amount = float(amount_str)
+            except ValueError:
+                row_amount = b['credit_amount']
+        else:
+            row_amount = b['credit_amount']
+
+        cursor = start_date
+        count = 0
+        while cursor <= end_date:
+            p_start, p_end = get_current_period(b['period_type'], for_date=cursor)
+            ps_str = str(p_start)
+            existing = db.execute(
+                'SELECT id FROM redemptions WHERE benefit_id=? AND period_start=?',
+                (id, ps_str)
+            ).fetchone()
+            if existing:
+                db.execute('UPDATE redemptions SET amount = ? WHERE id = ?',
+                           (row_amount, existing['id']))
+            else:
+                db.execute(
+                    'INSERT INTO redemptions (benefit_id, period_start, amount, notes) '
+                    'VALUES (?, ?, ?, ?)',
+                    (id, ps_str, row_amount, notes or 'subscription'))
+            count += 1
+            cursor = p_end + timedelta(days=1)
+        db.commit()
+        db.close()
+        flash(f'Recorded redemption for {count} period{"s" if count != 1 else ""}.', 'success')
+        return redirect(request.referrer or url_for('dashboard'))
+
     redemption_date = None
     date_str = request.form.get('redemption_date', '').strip()
     if date_str:
@@ -613,7 +654,6 @@ def benefit_redeem(id):
     period_start, _ = get_current_period(b['period_type'], for_date=redemption_date)
 
     amount = request.form.get('amount', '').strip() or None
-    notes  = request.form.get('notes', '').strip() or None
     if amount:
         try:
             amount = float(amount)
@@ -880,22 +920,10 @@ def _run_reminder_check(force=False):
     and today is N days before period_end (matching a configured reminder),
     send an email. Returns count of benefits included in the email.
     force=True bypasses the "already sent" dedup check.
-    Also rolls active subscriptions forward into the current period.
     """
     db = get_db()
     gmail_user = get_setting(db, 'gmail_user')
     gmail_pass = get_setting(db, 'gmail_app_password')
-
-    raw = db.execute('''
-        SELECT b.*, c.name AS card_name, c.owner_email
-        FROM benefits b
-        JOIN cards c ON c.id = b.card_id
-        WHERE b.active = 1 AND c.active = 1
-    ''').fetchall()
-
-    for row in raw:
-        if row['is_subscription']:
-            ensure_subscription_redemption(db, row)
 
     if not all([gmail_user, gmail_pass]):
         db.close()
@@ -903,6 +931,13 @@ def _run_reminder_check(force=False):
 
     today = date.today()
     benefits_due = []
+
+    raw = db.execute('''
+        SELECT b.*, c.name AS card_name, c.owner_email
+        FROM benefits b
+        JOIN cards c ON c.id = b.card_id
+        WHERE b.active = 1 AND c.active = 1
+    ''').fetchall()
 
     for row in raw:
         b = enrich_benefit(db, row)
