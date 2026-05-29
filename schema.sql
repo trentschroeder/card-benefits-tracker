@@ -52,15 +52,34 @@ CREATE TABLE IF NOT EXISTS invitations (
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
-CREATE TABLE IF NOT EXISTS user_cards (
-    id           INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id      INTEGER NOT NULL,
-    card_id      INTEGER NOT NULL,
-    active       INTEGER NOT NULL DEFAULT 1,
-    assigned_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(user_id, card_id),
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+CREATE TABLE IF NOT EXISTS card_share_groups (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    card_id     INTEGER NOT NULL,
+    created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (card_id) REFERENCES cards(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS card_share_members (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    group_id    INTEGER NOT NULL,
+    user_id     INTEGER NOT NULL,
+    joined_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(group_id, user_id),
+    FOREIGN KEY (group_id) REFERENCES card_share_groups(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id)  REFERENCES users(id)             ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS user_cards (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id         INTEGER NOT NULL,
+    card_id         INTEGER NOT NULL,
+    active          INTEGER NOT NULL DEFAULT 1,
+    share_group_id  INTEGER,
+    assigned_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(user_id, card_id),
+    FOREIGN KEY (user_id)        REFERENCES users(id)              ON DELETE CASCADE,
+    FOREIGN KEY (card_id)        REFERENCES cards(id)              ON DELETE CASCADE,
+    FOREIGN KEY (share_group_id) REFERENCES card_share_groups(id)  ON DELETE SET NULL
 );
 
 CREATE TABLE IF NOT EXISTS user_benefits (

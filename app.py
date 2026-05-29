@@ -125,6 +125,13 @@ def init_db():
         db.commit()
     except Exception:
         pass
+    # Phase 9a: card sharing — user_cards gets a nullable share_group_id pointing
+    # at card_share_groups (created by executescript above). NULL = solo card.
+    try:
+        db.execute('ALTER TABLE user_cards ADD COLUMN share_group_id INTEGER REFERENCES card_share_groups(id) ON DELETE SET NULL')
+        db.commit()
+    except Exception:
+        pass
     _migrate_subscriptions_to_redemptions(db)
     _drop_last_subscription_period_if_exists(db)
     _migrate_credentials_file_to_users(db)
@@ -374,8 +381,32 @@ def set_setting(db, key, value):
     db.execute('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)', (key, value))
 
 
+def effective_user_ids_for_card(db, card_id, viewer_id):
+    """Return the list of user_ids whose redemptions pool together for this card,
+    from the viewer's perspective. Solo card → [viewer_id]. Shared card →
+    every share group member's user_id.
+
+    The viewer is expected to have a user_cards row for the card; if they
+    don't (e.g., admin viewing a benefit they don't personally own), the
+    function falls back to [viewer_id] so existing solo-scoped behavior holds.
+    """
+    row = db.execute(
+        'SELECT share_group_id FROM user_cards WHERE user_id = ? AND card_id = ?',
+        (viewer_id, card_id)
+    ).fetchone()
+    if not row or row['share_group_id'] is None:
+        return [viewer_id]
+    members = [r['user_id'] for r in db.execute(
+        'SELECT user_id FROM card_share_members WHERE group_id = ?',
+        (row['share_group_id'],)
+    ).fetchall()]
+    return members or [viewer_id]
+
+
 def enrich_benefit(db, benefit, user_id):
-    """Add period info and usage totals to a benefit row dict, scoped to one user."""
+    """Add period info and usage totals to a benefit row dict, scoped to one
+    user. Redemption sums pool across share-group members when the card is
+    shared; reminder days remain strictly per-user."""
     b = dict(benefit)
     period_start, period_end = get_current_period(b['period_type'])
     b['period_start'] = period_start
@@ -383,10 +414,13 @@ def enrich_benefit(db, benefit, user_id):
     b['days_left']    = days_left(period_end)
     b['period_label'] = PERIOD_LABELS[b['period_type']]
 
+    pool = effective_user_ids_for_card(db, b['card_id'], user_id)
+    placeholders = ','.join('?' * len(pool))
+
     rows = db.execute(
-        'SELECT COALESCE(SUM(amount), 0) AS total FROM redemptions '
-        'WHERE user_id = ? AND benefit_id = ? AND period_start = ?',
-        (user_id, b['id'], str(period_start))
+        f'SELECT COALESCE(SUM(amount), 0) AS total FROM redemptions '
+        f'WHERE user_id IN ({placeholders}) AND benefit_id = ? AND period_start = ?',
+        (*pool, b['id'], str(period_start))
     ).fetchone()
     b['amount_used'] = rows['total']
 
@@ -396,9 +430,9 @@ def enrich_benefit(db, benefit, user_id):
         b['fully_used'] = b['remaining'] <= 0
     else:
         count = db.execute(
-            'SELECT COUNT(*) FROM redemptions '
-            'WHERE user_id = ? AND benefit_id = ? AND period_start = ?',
-            (user_id, b['id'], str(period_start))
+            f'SELECT COUNT(*) FROM redemptions '
+            f'WHERE user_id IN ({placeholders}) AND benefit_id = ? AND period_start = ?',
+            (*pool, b['id'], str(period_start))
         ).fetchone()[0]
         b['remaining']  = 0 if count > 0 else 1
         b['pct_used']   = 100 if count > 0 else 0
@@ -417,7 +451,8 @@ _PERIODS_PER_YEAR = {'monthly': 12, 'quarterly': 4, 'semi-annual': 2, 'annual': 
 
 
 def compute_card_roi(db, enriched_benefits, user_id):
-    """Return (captured, max_possible) for a card's benefits this calendar year, for one user."""
+    """Return (captured, max_possible) for a card's benefits this calendar year.
+    Captured pools across share-group members when the card is shared."""
     year = str(date.today().year)
     captured = 0.0
     max_possible = 0.0
@@ -427,10 +462,12 @@ def compute_card_roi(db, enriched_benefits, user_id):
         ca = b['credit_amount']
         ppy = _PERIODS_PER_YEAR.get(b['period_type'], 1)
         max_possible += ca * ppy
+        pool = effective_user_ids_for_card(db, b['card_id'], user_id)
+        placeholders = ','.join('?' * len(pool))
         row = db.execute(
-            "SELECT COALESCE(SUM(amount), 0) AS total FROM redemptions "
-            "WHERE user_id = ? AND benefit_id = ? AND strftime('%Y', period_start) = ?",
-            (user_id, b['id'], year)
+            f"SELECT COALESCE(SUM(amount), 0) AS total FROM redemptions "
+            f"WHERE user_id IN ({placeholders}) AND benefit_id = ? AND strftime('%Y', period_start) = ?",
+            (*pool, b['id'], year)
         ).fetchone()
         captured += row['total']
     return captured, max_possible
@@ -1369,14 +1406,17 @@ def benefit_redeem(id):
         else:
             row_amount = b['credit_amount']
 
+        pool = effective_user_ids_for_card(db, b['card_id'], uid)
+        ph   = ','.join('?' * len(pool))
         cursor = start_date
         count = 0
         while cursor <= end_date:
             p_start, p_end = get_current_period(b['period_type'], for_date=cursor)
             ps_str = str(p_start)
+            # On shared cards, a row from ANY pool member covers this period.
             existing = db.execute(
-                'SELECT id FROM redemptions WHERE user_id=? AND benefit_id=? AND period_start=?',
-                (uid, id, ps_str)
+                f'SELECT id FROM redemptions WHERE user_id IN ({ph}) AND benefit_id=? AND period_start=?',
+                (*pool, id, ps_str)
             ).fetchone()
             if existing:
                 db.execute('UPDATE redemptions SET amount = ? WHERE id = ?',
@@ -1424,12 +1464,16 @@ def benefit_redeem(id):
 def redemption_edit(id):
     db  = get_db()
     row = db.execute(
-        'SELECT r.*, b.period_type FROM redemptions r '
+        'SELECT r.*, b.period_type, b.card_id FROM redemptions r '
         'JOIN benefits b ON b.id = r.benefit_id '
-        'WHERE r.id = ? AND r.user_id = ?',
-        (id, g.user['id'])
+        'WHERE r.id = ?',
+        (id,)
     ).fetchone()
     if not row:
+        db.close()
+        return redirect(url_for('dashboard'))
+    pool = effective_user_ids_for_card(db, row['card_id'], g.user['id'])
+    if row['user_id'] not in pool:
         db.close()
         return redirect(url_for('dashboard'))
     amount   = request.form.get('amount', '').strip() or None
@@ -1456,13 +1500,16 @@ def redemption_edit(id):
 def redemption_delete(id):
     db  = get_db()
     row = db.execute(
-        'SELECT benefit_id FROM redemptions WHERE id = ? AND user_id = ?',
-        (id, g.user['id'])
+        'SELECT r.user_id, b.card_id FROM redemptions r '
+        'JOIN benefits b ON b.id = r.benefit_id WHERE r.id = ?',
+        (id,)
     ).fetchone()
     if row:
-        db.execute('DELETE FROM redemptions WHERE id = ?', (id,))
-        db.commit()
-        flash('Redemption removed.', 'success')
+        pool = effective_user_ids_for_card(db, row['card_id'], g.user['id'])
+        if row['user_id'] in pool:
+            db.execute('DELETE FROM redemptions WHERE id = ?', (id,))
+            db.commit()
+            flash('Redemption removed.', 'success')
     db.close()
     return redirect(request.referrer or url_for('dashboard'))
 
@@ -1483,6 +1530,8 @@ def benefit_redemptions(id):
         flash('Benefit not found.', 'danger')
         return redirect(url_for('dashboard'))
     enriched = enrich_benefit(db, b, uid)
+    pool = effective_user_ids_for_card(db, b['card_id'], uid)
+    ph   = ','.join('?' * len(pool))
 
     # Build last-year period history
     _n_map = {'monthly': 12, 'quarterly': 4, 'semi-annual': 2, 'annual': 1}
@@ -1492,9 +1541,9 @@ def benefit_redemptions(id):
     for _ in range(_n_map.get(enriched['period_type'], 1)):
         p_start, p_end = get_current_period(enriched['period_type'], for_date=check_date)
         pr = db.execute(
-            'SELECT COALESCE(SUM(amount),0) AS total, COUNT(*) AS cnt '
-            'FROM redemptions WHERE user_id=? AND benefit_id=? AND period_start=?',
-            (uid, enriched['id'], str(p_start))
+            f'SELECT COALESCE(SUM(amount),0) AS total, COUNT(*) AS cnt '
+            f'FROM redemptions WHERE user_id IN ({ph}) AND benefit_id=? AND period_start=?',
+            (*pool, enriched['id'], str(p_start))
         ).fetchone()
         amount_used = float(pr['total'])
         if enriched['credit_amount']:
@@ -1509,12 +1558,12 @@ def benefit_redemptions(id):
         check_date = p_start - timedelta(days=1)
     period_history.reverse()
 
-    # Group all redemptions by period_start
+    # Group all redemptions by period_start (pooled across share members)
     from collections import defaultdict
     all_redemptions = db.execute(
-        'SELECT * FROM redemptions WHERE user_id=? AND benefit_id=? '
-        'ORDER BY period_start DESC, redeemed_at DESC',
-        (uid, id)
+        f'SELECT * FROM redemptions WHERE user_id IN ({ph}) AND benefit_id=? '
+        f'ORDER BY period_start DESC, redeemed_at DESC',
+        (*pool, id)
     ).fetchall()
     redemptions_by_period = defaultdict(list)
     for r in all_redemptions:
@@ -1523,17 +1572,17 @@ def benefit_redemptions(id):
     # Older periods (beyond last year) that have redemptions
     oldest_in_range = str(period_history[0]['period_start']) if period_history else None
     has_older = bool(oldest_in_range and db.execute(
-        'SELECT 1 FROM redemptions WHERE user_id=? AND benefit_id=? AND period_start<? LIMIT 1',
-        (uid, id, oldest_in_range)
+        f'SELECT 1 FROM redemptions WHERE user_id IN ({ph}) AND benefit_id=? AND period_start<? LIMIT 1',
+        (*pool, id, oldest_in_range)
     ).fetchone())
 
     show_all = request.args.get('all') == '1'
     older_periods = []
     if show_all and oldest_in_range:
         old_starts = db.execute(
-            'SELECT DISTINCT period_start FROM redemptions '
-            'WHERE user_id=? AND benefit_id=? AND period_start<? ORDER BY period_start DESC',
-            (uid, id, oldest_in_range)
+            f'SELECT DISTINCT period_start FROM redemptions '
+            f'WHERE user_id IN ({ph}) AND benefit_id=? AND period_start<? ORDER BY period_start DESC',
+            (*pool, id, oldest_in_range)
         ).fetchall()
         for row in old_starts:
             ps_str  = row['period_start']
