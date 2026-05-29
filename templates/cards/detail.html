@@ -121,7 +121,8 @@
             <a href="{{ url_for('benefit_redemptions', id=b.id, uc=card.user_card_id) }}" class="btn btn-outline-secondary btn-sm" title="History">
               <i class="bi bi-clock-history"></i>
             </a>
-            <form method="post" action="{{ url_for('benefit_pursue_toggle', id=b.id, uc=card.user_card_id) }}" class="d-inline">
+            <form method="post" action="{{ url_for('benefit_pursue_toggle', id=b.id, uc=card.user_card_id) }}" class="d-inline"
+                  {% if b.user_active != 0 %}onsubmit="return confirm('Mark &quot;{{ b.name|e }}&quot; as not pursuing? You won't receive any reminder or summary emails for this benefit until you switch it back to pursuing on this card.');"{% endif %}>
               <button type="submit" class="btn btn-outline-secondary btn-sm"
                       title="{% if b.user_active == 0 %}Resume pursuing this benefit{% else %}Mark as not pursuing{% endif %}">
                 <i class="bi bi-{% if b.user_active == 0 %}eye{% else %}eye-slash{% endif %}"></i>
