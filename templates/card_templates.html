@@ -8,14 +8,14 @@
     <div class="text-muted small">Catalog management. Edits here apply to every user who has the card.</div>
   </div>
   <a href="{{ url_for('card_new') }}" class="btn btn-primary btn-sm">
-    <i class="bi bi-plus-lg me-1"></i>Create new card
+    <i class="bi bi-plus-lg me-1"></i>Create new card template
   </a>
 </div>
 
 {% if not cards %}
   <div class="text-center py-5 text-muted">
     <i class="bi bi-collection display-4 mb-3 d-block"></i>
-    No catalog cards yet. <a href="{{ url_for('card_new') }}">Create the first one</a>.
+    No card templates yet. <a href="{{ url_for('card_new') }}">Create the first one</a>.
   </div>
 {% else %}
 <div class="table-responsive">
