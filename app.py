@@ -33,6 +33,7 @@ def _load_secret():
 
 
 app.secret_key = _load_secret()
+app.permanent_session_lifetime = timedelta(days=90)
 
 
 def login_required(f):
@@ -510,6 +511,7 @@ def login():
             if row and check_password_hash(row['password_hash'], password):
                 session.clear()
                 session['user_id'] = row['id']
+                session.permanent = True
                 return redirect(request.args.get('next') or url_for('dashboard'))
         error = 'Invalid email or password.'
     return render_template('login.html', error=error)
@@ -775,6 +777,7 @@ def accept_invite(token):
         db.close()
         session.clear()
         session['user_id'] = inv['user_id']
+        session.permanent = True
         flash('Account set up. Welcome!', 'success')
         return redirect(url_for('dashboard'))
 
@@ -841,6 +844,7 @@ def reset_password(token):
         db.close()
         session.clear()
         session['user_id'] = inv['user_id']
+        session.permanent = True
         flash('Password reset. You are now signed in.', 'success')
         return redirect(url_for('dashboard'))
 
