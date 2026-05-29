@@ -300,30 +300,58 @@ def _populate_user_cards_for_admin(db, admin_id):
     db.commit()
 
 
+def _table_cols(db, table):
+    return {r[1] for r in db.execute(f'PRAGMA table_info({table})').fetchall()}
+
+
+def _migrate_one_table_to_user_card_id(db, table, new_table_sql, copy_sql,
+                                        backfill_via_benefit=True,
+                                        backfill_via_group=False):
+    """Generic per-table migration: add user_card_id (nullable), backfill from
+    the existing user_id + a sibling column, then rebuild the table to enforce
+    NOT NULL + the new UNIQUE constraints. Skips if user_card_id is already
+    present, so partial migrations can resume from where they stopped."""
+    cols = _table_cols(db, table)
+    if 'user_card_id' in cols:
+        return
+    db.execute(f'ALTER TABLE {table} ADD COLUMN user_card_id INTEGER')
+    if backfill_via_benefit:
+        db.execute(f'''
+            UPDATE {table} SET user_card_id = (
+                SELECT uc.id FROM user_cards uc
+                JOIN benefits b ON b.card_id = uc.card_id
+                WHERE uc.user_id = {table}.user_id AND b.id = {table}.benefit_id
+            )
+        ''')
+    elif backfill_via_group:
+        db.execute(f'''
+            UPDATE {table} SET user_card_id = (
+                SELECT uc.id FROM user_cards uc
+                JOIN card_share_groups csg ON csg.card_id = uc.card_id
+                WHERE uc.user_id = {table}.user_id
+                  AND csg.id    = {table}.group_id
+            )
+        ''')
+    db.execute(new_table_sql)
+    db.execute(copy_sql)
+    db.execute(f'DROP TABLE {table}')
+    db.execute(f'ALTER TABLE {table}_new RENAME TO {table}')
+
+
 def _migrate_to_per_user_card(db):
     """Phase 10: thread user_card_id through every per-instance table
     (redemptions, reminders, sent_reminders, user_benefits,
     card_share_members), drop UNIQUE(user_id, card_id) on user_cards,
-    and add user_cards.nickname. Idempotent — detects completion by
-    looking for user_card_id on user_benefits."""
-    ub_cols = {r[1] for r in db.execute('PRAGMA table_info(user_benefits)').fetchall()}
-    if 'user_card_id' in ub_cols:
-        return
+    and add user_cards.nickname.
 
+    Each per-table step is independently idempotent — re-running on a
+    partial state advances the laggards rather than short-circuiting,
+    so a half-completed prior run heals on the next start."""
     db.commit()
     db.execute('PRAGMA foreign_keys = OFF')
     try:
-        # === redemptions ===
-        db.execute('ALTER TABLE redemptions ADD COLUMN user_card_id INTEGER')
-        db.execute('''
-            UPDATE redemptions SET user_card_id = (
-                SELECT uc.id FROM user_cards uc
-                JOIN benefits b ON b.card_id = uc.card_id
-                WHERE uc.user_id = redemptions.user_id AND b.id = redemptions.benefit_id
-            )
-        ''')
-        db.execute('''
-            CREATE TABLE redemptions_new (
+        _migrate_one_table_to_user_card_id(db, 'redemptions',
+            '''CREATE TABLE redemptions_new (
                 id           INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_card_id INTEGER NOT NULL,
                 benefit_id   INTEGER NOT NULL,
@@ -333,27 +361,13 @@ def _migrate_to_per_user_card(db):
                 redeemed_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (user_card_id) REFERENCES user_cards(id) ON DELETE CASCADE,
                 FOREIGN KEY (benefit_id)   REFERENCES benefits(id)   ON DELETE CASCADE
-            )
-        ''')
-        db.execute('''
-            INSERT INTO redemptions_new (id, user_card_id, benefit_id, period_start, amount, notes, redeemed_at)
-            SELECT id, user_card_id, benefit_id, period_start, amount, notes, redeemed_at FROM redemptions
-            WHERE user_card_id IS NOT NULL
-        ''')
-        db.execute('DROP TABLE redemptions')
-        db.execute('ALTER TABLE redemptions_new RENAME TO redemptions')
+            )''',
+            '''INSERT INTO redemptions_new (id, user_card_id, benefit_id, period_start, amount, notes, redeemed_at)
+               SELECT id, user_card_id, benefit_id, period_start, amount, notes, redeemed_at FROM redemptions
+               WHERE user_card_id IS NOT NULL''')
 
-        # === reminders ===
-        db.execute('ALTER TABLE reminders ADD COLUMN user_card_id INTEGER')
-        db.execute('''
-            UPDATE reminders SET user_card_id = (
-                SELECT uc.id FROM user_cards uc
-                JOIN benefits b ON b.card_id = uc.card_id
-                WHERE uc.user_id = reminders.user_id AND b.id = reminders.benefit_id
-            )
-        ''')
-        db.execute('''
-            CREATE TABLE reminders_new (
+        _migrate_one_table_to_user_card_id(db, 'reminders',
+            '''CREATE TABLE reminders_new (
                 id           INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_card_id INTEGER NOT NULL,
                 benefit_id   INTEGER NOT NULL,
@@ -361,27 +375,13 @@ def _migrate_to_per_user_card(db):
                 UNIQUE(user_card_id, benefit_id, days_before),
                 FOREIGN KEY (user_card_id) REFERENCES user_cards(id) ON DELETE CASCADE,
                 FOREIGN KEY (benefit_id)   REFERENCES benefits(id)   ON DELETE CASCADE
-            )
-        ''')
-        db.execute('''
-            INSERT INTO reminders_new (id, user_card_id, benefit_id, days_before)
-            SELECT id, user_card_id, benefit_id, days_before FROM reminders
-            WHERE user_card_id IS NOT NULL
-        ''')
-        db.execute('DROP TABLE reminders')
-        db.execute('ALTER TABLE reminders_new RENAME TO reminders')
+            )''',
+            '''INSERT INTO reminders_new (id, user_card_id, benefit_id, days_before)
+               SELECT id, user_card_id, benefit_id, days_before FROM reminders
+               WHERE user_card_id IS NOT NULL''')
 
-        # === sent_reminders ===
-        db.execute('ALTER TABLE sent_reminders ADD COLUMN user_card_id INTEGER')
-        db.execute('''
-            UPDATE sent_reminders SET user_card_id = (
-                SELECT uc.id FROM user_cards uc
-                JOIN benefits b ON b.card_id = uc.card_id
-                WHERE uc.user_id = sent_reminders.user_id AND b.id = sent_reminders.benefit_id
-            )
-        ''')
-        db.execute('''
-            CREATE TABLE sent_reminders_new (
+        _migrate_one_table_to_user_card_id(db, 'sent_reminders',
+            '''CREATE TABLE sent_reminders_new (
                 id           INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_card_id INTEGER NOT NULL,
                 benefit_id   INTEGER NOT NULL,
@@ -391,27 +391,13 @@ def _migrate_to_per_user_card(db):
                 UNIQUE(user_card_id, benefit_id, period_start, days_before),
                 FOREIGN KEY (user_card_id) REFERENCES user_cards(id) ON DELETE CASCADE,
                 FOREIGN KEY (benefit_id)   REFERENCES benefits(id)   ON DELETE CASCADE
-            )
-        ''')
-        db.execute('''
-            INSERT INTO sent_reminders_new (id, user_card_id, benefit_id, period_start, days_before, sent_at)
-            SELECT id, user_card_id, benefit_id, period_start, days_before, sent_at FROM sent_reminders
-            WHERE user_card_id IS NOT NULL
-        ''')
-        db.execute('DROP TABLE sent_reminders')
-        db.execute('ALTER TABLE sent_reminders_new RENAME TO sent_reminders')
+            )''',
+            '''INSERT INTO sent_reminders_new (id, user_card_id, benefit_id, period_start, days_before, sent_at)
+               SELECT id, user_card_id, benefit_id, period_start, days_before, sent_at FROM sent_reminders
+               WHERE user_card_id IS NOT NULL''')
 
-        # === user_benefits ===
-        db.execute('ALTER TABLE user_benefits ADD COLUMN user_card_id INTEGER')
-        db.execute('''
-            UPDATE user_benefits SET user_card_id = (
-                SELECT uc.id FROM user_cards uc
-                JOIN benefits b ON b.card_id = uc.card_id
-                WHERE uc.user_id = user_benefits.user_id AND b.id = user_benefits.benefit_id
-            )
-        ''')
-        db.execute('''
-            CREATE TABLE user_benefits_new (
+        _migrate_one_table_to_user_card_id(db, 'user_benefits',
+            '''CREATE TABLE user_benefits_new (
                 id           INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_card_id INTEGER NOT NULL,
                 benefit_id   INTEGER NOT NULL,
@@ -419,28 +405,13 @@ def _migrate_to_per_user_card(db):
                 UNIQUE(user_card_id, benefit_id),
                 FOREIGN KEY (user_card_id) REFERENCES user_cards(id) ON DELETE CASCADE,
                 FOREIGN KEY (benefit_id)   REFERENCES benefits(id)   ON DELETE CASCADE
-            )
-        ''')
-        db.execute('''
-            INSERT INTO user_benefits_new (id, user_card_id, benefit_id, active)
-            SELECT id, user_card_id, benefit_id, active FROM user_benefits
-            WHERE user_card_id IS NOT NULL
-        ''')
-        db.execute('DROP TABLE user_benefits')
-        db.execute('ALTER TABLE user_benefits_new RENAME TO user_benefits')
+            )''',
+            '''INSERT INTO user_benefits_new (id, user_card_id, benefit_id, active)
+               SELECT id, user_card_id, benefit_id, active FROM user_benefits
+               WHERE user_card_id IS NOT NULL''')
 
-        # === card_share_members ===
-        db.execute('ALTER TABLE card_share_members ADD COLUMN user_card_id INTEGER')
-        db.execute('''
-            UPDATE card_share_members SET user_card_id = (
-                SELECT uc.id FROM user_cards uc
-                JOIN card_share_groups csg ON csg.card_id = uc.card_id
-                WHERE uc.user_id = card_share_members.user_id
-                  AND csg.id    = card_share_members.group_id
-            )
-        ''')
-        db.execute('''
-            CREATE TABLE card_share_members_new (
+        _migrate_one_table_to_user_card_id(db, 'card_share_members',
+            '''CREATE TABLE card_share_members_new (
                 id           INTEGER PRIMARY KEY AUTOINCREMENT,
                 group_id     INTEGER NOT NULL,
                 user_card_id INTEGER NOT NULL,
@@ -448,37 +419,40 @@ def _migrate_to_per_user_card(db):
                 UNIQUE(group_id, user_card_id),
                 FOREIGN KEY (group_id)     REFERENCES card_share_groups(id) ON DELETE CASCADE,
                 FOREIGN KEY (user_card_id) REFERENCES user_cards(id)        ON DELETE CASCADE
-            )
-        ''')
-        db.execute('''
-            INSERT INTO card_share_members_new (id, group_id, user_card_id, joined_at)
-            SELECT id, group_id, user_card_id, joined_at FROM card_share_members
-            WHERE user_card_id IS NOT NULL
-        ''')
-        db.execute('DROP TABLE card_share_members')
-        db.execute('ALTER TABLE card_share_members_new RENAME TO card_share_members')
+            )''',
+            '''INSERT INTO card_share_members_new (id, group_id, user_card_id, joined_at)
+               SELECT id, group_id, user_card_id, joined_at FROM card_share_members
+               WHERE user_card_id IS NOT NULL''',
+            backfill_via_benefit=False, backfill_via_group=True)
 
         # === user_cards: drop UNIQUE(user_id, card_id), add nickname ===
-        db.execute('''
-            CREATE TABLE user_cards_new (
-                id              INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id         INTEGER NOT NULL,
-                card_id         INTEGER NOT NULL,
-                active          INTEGER NOT NULL DEFAULT 1,
-                share_group_id  INTEGER,
-                nickname        TEXT,
-                assigned_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (user_id)        REFERENCES users(id)             ON DELETE CASCADE,
-                FOREIGN KEY (card_id)        REFERENCES cards(id)             ON DELETE CASCADE,
-                FOREIGN KEY (share_group_id) REFERENCES card_share_groups(id) ON DELETE SET NULL
-            )
-        ''')
-        db.execute('''
-            INSERT INTO user_cards_new (id, user_id, card_id, active, share_group_id, assigned_at)
-            SELECT id, user_id, card_id, active, share_group_id, assigned_at FROM user_cards
-        ''')
-        db.execute('DROP TABLE user_cards')
-        db.execute('ALTER TABLE user_cards_new RENAME TO user_cards')
+        # Detect completion by the absence of a UNIQUE index from sqlite_master.
+        # SQLite names anonymous UNIQUE constraints sqlite_autoindex_user_cards_N.
+        # Easier: try to insert a duplicate test row in a savepoint; if it
+        # fails on UNIQUE, recreate the table. Simpler still: just check
+        # whether nickname exists — if so, this step already ran.
+        uc_cols = _table_cols(db, 'user_cards')
+        if 'nickname' not in uc_cols:
+            db.execute('''
+                CREATE TABLE user_cards_new (
+                    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id         INTEGER NOT NULL,
+                    card_id         INTEGER NOT NULL,
+                    active          INTEGER NOT NULL DEFAULT 1,
+                    share_group_id  INTEGER,
+                    nickname        TEXT,
+                    assigned_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (user_id)        REFERENCES users(id)             ON DELETE CASCADE,
+                    FOREIGN KEY (card_id)        REFERENCES cards(id)             ON DELETE CASCADE,
+                    FOREIGN KEY (share_group_id) REFERENCES card_share_groups(id) ON DELETE SET NULL
+                )
+            ''')
+            db.execute('''
+                INSERT INTO user_cards_new (id, user_id, card_id, active, share_group_id, assigned_at)
+                SELECT id, user_id, card_id, active, share_group_id, assigned_at FROM user_cards
+            ''')
+            db.execute('DROP TABLE user_cards')
+            db.execute('ALTER TABLE user_cards_new RENAME TO user_cards')
         db.commit()
     finally:
         db.execute('PRAGMA foreign_keys = ON')
