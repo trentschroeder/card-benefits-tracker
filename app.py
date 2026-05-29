@@ -1243,19 +1243,8 @@ def benefit_edit(id):
                 'active=? WHERE id=?',
                 (name, description, credit_amount, period_type, is_subscription, active, id))
 
-        # "Pursuing" is per-user for every role (admin can opt out of their own pursuit too)
-        pursuing = 1 if request.form.get('pursuing') else 0
-        existing = db.execute(
-            'SELECT id FROM user_benefits WHERE user_id = ? AND benefit_id = ?',
-            (uid, id)).fetchone()
-        if existing:
-            db.execute('UPDATE user_benefits SET active = ? WHERE id = ?',
-                       (pursuing, existing['id']))
-        else:
-            db.execute(
-                'INSERT INTO user_benefits (user_id, benefit_id, active) VALUES (?, ?, ?)',
-                (uid, id, pursuing))
-
+        # "Pursuing" is no longer part of the benefit edit form. It moves to
+        # a dedicated per-user toggle on the card detail row (benefit_pursue_toggle).
         _save_reminders(reminder_days, custom_day)
         db.commit()
         card_id = b['card_id']
@@ -1268,16 +1257,48 @@ def benefit_edit(id):
         'SELECT days_before FROM reminders WHERE user_id = ? AND benefit_id = ?',
         (uid, id)
     ).fetchall()]
-    # Per-user "pursuing" defaults to True unless they've explicitly opted out
-    ub = db.execute(
-        'SELECT active FROM user_benefits WHERE user_id = ? AND benefit_id = ?',
-        (uid, id)).fetchone()
     form_data = dict(b)
-    form_data['pursuing'] = ub['active'] if ub else 1
     db.close()
     return render_template('benefits/form.html', card=card, form=form_data,
                            benefit=b, existing_reminder_days=existing_days,
                            period_labels=PERIOD_LABELS)
+
+
+@app.route('/benefits/<int:id>/pursue-toggle', methods=['POST'])
+@login_required
+def benefit_pursue_toggle(id):
+    """Flip the current user's pursuing flag for this benefit. Per-user only;
+    has no effect on the catalog or on other users."""
+    db  = get_db()
+    uid = g.user['id']
+    b = db.execute('''
+        SELECT b.id, b.name FROM benefits b
+        JOIN user_cards uc ON uc.card_id = b.card_id
+        WHERE b.id = ? AND uc.user_id = ?
+    ''', (id, uid)).fetchone()
+    if not b:
+        db.close()
+        flash('Benefit not found.', 'danger')
+        return redirect(url_for('dashboard'))
+    row = db.execute(
+        'SELECT id, active FROM user_benefits WHERE user_id = ? AND benefit_id = ?',
+        (uid, id)).fetchone()
+    if row:
+        new_state = 0 if row['active'] else 1
+        db.execute('UPDATE user_benefits SET active = ? WHERE id = ?',
+                   (new_state, row['id']))
+    else:
+        # No override yet — default state is pursuing, so toggle to not pursuing
+        new_state = 0
+        db.execute('INSERT INTO user_benefits (user_id, benefit_id, active) VALUES (?, ?, 0)',
+                   (uid, id))
+    db.commit()
+    db.close()
+    if new_state:
+        flash(f'Resumed pursuing "{b["name"]}".', 'success')
+    else:
+        flash(f'Marked "{b["name"]}" as not pursuing. Hidden from your dashboard and emails.', 'info')
+    return redirect(request.referrer or url_for('dashboard'))
 
 
 @app.route('/benefits/<int:id>/delete', methods=['POST'])
