@@ -128,9 +128,9 @@
                 <i class="bi bi-{% if b.user_active == 0 %}eye{% else %}eye-slash{% endif %}"></i>
               </button>
             </form>
-            <a href="{{ url_for('benefit_edit', id=b.id, uc=card.user_card_id) }}" class="btn btn-outline-secondary btn-sm"
-               title="{% if g.user.is_admin %}Edit reminders{% else %}Edit reminders{% endif %}">
-              <i class="bi bi-pencil"></i>
+            <a href="{{ url_for('instance_benefit_edit', uc_id=card.user_card_id, bid=b.id) }}" class="btn btn-outline-secondary btn-sm"
+               title="My reminder schedule">
+              <i class="bi bi-bell"></i>
             </a>
           </div>
         </td>

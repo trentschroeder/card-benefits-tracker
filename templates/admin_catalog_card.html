@@ -85,7 +85,7 @@
           {% else %}<span class="badge bg-secondary">Inactive</span>{% endif %}
         </td>
         <td class="text-end">
-          <a href="{{ url_for('benefit_edit', id=b.id) }}" class="btn btn-outline-secondary btn-sm" title="Edit">
+          <a href="{{ url_for('catalog_benefit_edit', card_id=card.id, bid=b.id) }}" class="btn btn-outline-secondary btn-sm" title="Edit catalog benefit">
             <i class="bi bi-pencil"></i>
           </a>
         </td>

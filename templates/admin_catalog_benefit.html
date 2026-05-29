@@ -1,0 +1,101 @@
+{% extends 'base.html' %}
+{% block title %}{% if benefit %}Catalog · {{ benefit.name }}{% else %}Add Benefit{% endif %} — Card Benefits{% endblock %}
+{% block content %}
+
+<div class="d-flex align-items-center gap-2 mb-3">
+  <h2 class="mb-0">{% if benefit %}{{ benefit.name }}{% else %}Add benefit to catalog{% endif %}</h2>
+  <span class="badge bg-secondary">Catalog benefit</span>
+</div>
+<p class="text-muted small mb-4">
+  {% if benefit %}This is the canonical record for the benefit on <strong>{{ card.name }}</strong>. Changes here apply to every user who has the card.
+  {% else %}Adding a benefit to <strong>{{ card.name }}</strong>. It will appear on every user's dashboard that has this card.
+  {% endif %}
+  Per-user reminder schedules live separately on each card instance.
+</p>
+
+<div class="card p-4 mb-4">
+  <form method="post">
+    <div class="mb-3">
+      <label class="form-label">Benefit Name <span class="text-danger">*</span></label>
+      <input name="name" type="text" class="form-control"
+             value="{{ form.get('name', '') }}" required autofocus>
+    </div>
+    <div class="mb-3">
+      <label class="form-label">Description</label>
+      <input name="description" type="text" class="form-control"
+             value="{{ form.get('description', '') or '' }}"
+             placeholder="e.g. Up to $300 for travel purchases">
+    </div>
+    <div class="mb-3">
+      <label class="form-label">Credit Amount ($)</label>
+      <input name="credit_amount" type="number" step="0.01" min="0" class="form-control"
+             value="{{ form.get('credit_amount', '') or '' }}"
+             placeholder="Leave blank for non-dollar benefits (e.g. lounge access)">
+      <div class="form-text">Leave blank to track as used/not-used rather than by dollar amount.</div>
+    </div>
+    <div class="mb-3">
+      <label class="form-label">Renewal Period <span class="text-danger">*</span></label>
+      <select name="period_type" class="form-select">
+        {% for key, label in period_labels.items() %}
+          <option value="{{ key }}"
+            {% if form.get('period_type', 'monthly') == key %}selected{% endif %}>
+            {{ label }}
+          </option>
+        {% endfor %}
+      </select>
+      <div class="form-text">Periods align to the calendar (monthly = 1st of month; quarterly = Jan/Apr/Jul/Oct; semi-annual = Jan/Jul; annual = Jan–Dec).</div>
+    </div>
+    <div class="mb-3">
+      <div class="form-check form-switch">
+        <input name="is_subscription" type="checkbox" class="form-check-input" id="isSubscription"
+               role="switch" {% if form.get('is_subscription') %}checked{% endif %}>
+        <label class="form-check-label fw-semibold" for="isSubscription">
+          <i class="bi bi-arrow-repeat me-1"></i>This is a subscription
+        </label>
+      </div>
+      <div class="form-text">Marks this benefit as a subscription. Recording a redemption then lets you pick a month range so one row is added per period.</div>
+    </div>
+    <div class="mb-3 form-check">
+      <input name="active" type="checkbox" class="form-check-input" id="activeCheck"
+             {% if form.get('active', 1) %}checked{% endif %}>
+      <label class="form-check-label" for="activeCheck">Active in catalog</label>
+      <div class="form-text">When off, this benefit disappears from every user's dashboard. Use this for retired or never-launched benefits.</div>
+    </div>
+
+    <div class="d-flex gap-2 mt-4">
+      <button class="btn btn-primary">Save</button>
+      <a href="{{ url_for('catalog_card_edit', card_id=card.id) }}" class="btn btn-outline-secondary">Cancel</a>
+      {% if benefit %}
+      <button type="button" class="btn btn-outline-danger ms-auto"
+              data-bs-toggle="modal" data-bs-target="#deleteBenefitModal">
+        <i class="bi bi-trash me-1"></i>Delete from catalog
+      </button>
+      {% endif %}
+    </div>
+  </form>
+</div>
+
+{% if benefit %}
+<div class="modal fade" id="deleteBenefitModal" tabindex="-1">
+  <div class="modal-dialog modal-sm">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h6 class="modal-title text-danger">Delete catalog benefit</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        Delete <strong>{{ benefit.name }}</strong> from the {{ card.name }} catalog?
+        Every user's redemption history for this benefit will be removed as well.
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+        <form method="post" action="{{ url_for('catalog_benefit_delete', card_id=card.id, bid=benefit.id) }}">
+          <button class="btn btn-danger btn-sm">Delete</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+{% endblock %}

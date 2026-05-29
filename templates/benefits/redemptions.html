@@ -109,87 +109,20 @@
         </div>
       </div>
     </div>
-    <button class="btn btn-outline-secondary btn-sm d-inline-flex align-items-center text-nowrap flex-shrink-0"
-            onclick="toggleBenefitEdit()" title="Edit settings">
-      <i class="bi bi-gear me-1" id="gear-icon"></i>Edit
-    </button>
-  </div>
-
-  <!-- Inline edit form -->
-  <div id="benefitEditForm" style="display:none; border-top:1px solid var(--border-color); margin-top:1rem; padding-top:1rem;">
-    <form method="post" action="{{ url_for('benefit_edit', id=benefit.id) }}">
-      <input type="hidden" name="_next" value="{{ url_for('benefit_redemptions', id=benefit.id) }}">
-      <div class="row g-3">
-
-        <!-- Name + Active -->
-        <div class="col-sm-8">
-          <label class="form-label">Benefit Name</label>
-          <input name="name" type="text" class="form-control" value="{{ benefit.name }}" required>
-        </div>
-        <div class="col-sm-4 d-flex align-items-end">
-          <div class="form-check form-switch pb-2 mb-0">
-            <input name="active" type="checkbox" class="form-check-input" id="editActive"
-                   role="switch" {% if benefit.active %}checked{% endif %}>
-            <label class="form-check-label" for="editActive">Active</label>
-          </div>
-        </div>
-
-        <!-- Description (full width) -->
-        <div class="col-12">
-          <label class="form-label">Description</label>
-          <input name="description" type="text" class="form-control" value="{{ benefit.description or '' }}" placeholder="Optional details">
-        </div>
-
-        <!-- Amount + Period -->
-        <div class="col-sm-6">
-          <label class="form-label">Credit Amount ($)</label>
-          <input name="credit_amount" type="number" step="0.01" min="0" class="form-control"
-                 value="{{ benefit.credit_amount or '' }}" placeholder="Leave blank for used/not-used">
-        </div>
-        <div class="col-sm-6">
-          <label class="form-label">Renewal Period</label>
-          <select name="period_type" class="form-select">
-            {% for key, label in period_labels.items() %}
-              <option value="{{ key }}" {% if benefit.period_type == key %}selected{% endif %}>{{ label }}</option>
-            {% endfor %}
-          </select>
-        </div>
-
-        <!-- Subscription block -->
-        <div class="col-12">
-          <div class="p-3 rounded" style="background: color-mix(in srgb, var(--bg-card) 92%, var(--text-primary) 8%);">
-            <div class="form-check form-switch mb-0">
-              <input name="is_subscription" type="checkbox" class="form-check-input" id="editIsSubscription"
-                     role="switch" {% if benefit.is_subscription %}checked{% endif %}>
-              <label class="form-check-label" for="editIsSubscription">
-                <i class="bi bi-arrow-repeat me-1"></i>Subscription (record redemptions by month range)
-              </label>
-            </div>
-          </div>
-        </div>
-
-        <!-- Reminders -->
-        <div class="col-12">
-          <label class="form-label"><i class="bi bi-bell me-1"></i>Email Reminders</label>
-          <div class="form-text mb-2">Send a reminder this many days before the period ends.</div>
-          <div class="d-flex flex-wrap gap-3">
-            {% for days in [1, 3, 7, 14, 30] %}
-            <div class="form-check">
-              <input type="checkbox" name="reminder_days" value="{{ days }}"
-                     id="editRem{{ days }}" class="form-check-input"
-                     {% if days in benefit.reminder_days %}checked{% endif %}>
-              <label class="form-check-label" for="editRem{{ days }}">{{ days }} day{{ 's' if days != 1 }}</label>
-            </div>
-            {% endfor %}
-          </div>
-        </div>
-      </div>
-
-      <div class="d-flex justify-content-end gap-2 mt-4">
-        <button type="button" class="btn btn-outline-secondary" onclick="toggleBenefitEdit()">Cancel</button>
-        <button class="btn btn-primary">Save Changes</button>
-      </div>
-    </form>
+    <div class="d-flex gap-2 flex-shrink-0">
+      {% if user_card_id %}
+      <a href="{{ url_for('instance_benefit_edit', uc_id=user_card_id, bid=benefit.id) }}"
+         class="btn btn-outline-secondary btn-sm text-nowrap" title="My reminder schedule">
+        <i class="bi bi-bell me-1"></i>My reminders
+      </a>
+      {% endif %}
+      {% if g.user.is_admin %}
+      <a href="{{ url_for('catalog_benefit_edit', card_id=benefit.card_id, bid=benefit.id) }}"
+         class="btn btn-outline-secondary btn-sm text-nowrap" title="Edit catalog details">
+        <i class="bi bi-tools me-1"></i>Edit catalog
+      </a>
+      {% endif %}
+    </div>
   </div>
 </div>
 
@@ -435,13 +368,5 @@
   document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => {
     new bootstrap.Tooltip(el, { trigger: 'hover focus' });
   });
-
-  function toggleBenefitEdit() {
-    var form = document.getElementById('benefitEditForm');
-    var icon = document.getElementById('gear-icon');
-    var open = form.style.display === 'none';
-    form.style.display = open ? '' : 'none';
-    icon.className = open ? 'bi bi-gear-fill me-1' : 'bi bi-gear me-1';
-  }
 </script>
 {% endblock %}

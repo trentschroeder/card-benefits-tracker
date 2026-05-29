@@ -1654,8 +1654,8 @@ def benefit_new(card_id):
         if not name:
             flash('Name is required.', 'danger')
             db.close()
-            return render_template('benefits/form.html', card=card, form=request.form,
-                                   period_labels=PERIOD_LABELS)
+            return render_template('admin_catalog_benefit.html', card=card, form=request.form,
+                                   benefit=None, period_labels=PERIOD_LABELS)
 
         if credit_amount:
             try:
@@ -1663,8 +1663,8 @@ def benefit_new(card_id):
             except ValueError:
                 flash('Credit amount must be a number.', 'danger')
                 db.close()
-                return render_template('benefits/form.html', card=card, form=request.form,
-                                       period_labels=PERIOD_LABELS)
+                return render_template('admin_catalog_benefit.html', card=card, form=request.form,
+                                       benefit=None, period_labels=PERIOD_LABELS)
 
         cur = db.execute(
             'INSERT INTO benefits (card_id, name, description, credit_amount, period_type, is_subscription) '
@@ -1699,143 +1699,128 @@ def benefit_new(card_id):
         return redirect(url_for('catalog_card_edit', card_id=card_id))
 
     db.close()
-    return render_template('benefits/form.html', card=card, form={},
-                           period_labels=PERIOD_LABELS)
+    return render_template('admin_catalog_benefit.html', card=card, form={},
+                           benefit=None, period_labels=PERIOD_LABELS)
 
 
-@app.route('/benefits/<int:id>/edit', methods=['GET', 'POST'])
-@login_required
-def benefit_edit(id):
-    """Edit a benefit. Admin path mutates the catalog row (name, amount,
-    etc.) and applies reminders to every user_cards instance they hold for
-    this card. Non-admin path requires ?uc=<user_card_id> and only edits
-    that specific instance's reminders."""
-    db  = get_db()
-    uid = g.user['id']
-    is_admin = bool(g.user['is_admin'])
-
-    # Non-admin needs ?uc to know which instance to scope reminders to.
-    uc_id_raw = request.values.get('uc')
-    target_uc = None
-    if uc_id_raw:
-        try:
-            target_uc = int(uc_id_raw)
-        except ValueError:
-            target_uc = None
-
-    if target_uc:
-        uc_row = db.execute(
-            'SELECT id, card_id FROM user_cards WHERE id = ? AND user_id = ?',
-            (target_uc, uid)).fetchone()
-        if not uc_row:
-            db.close()
-            flash('Card instance not found.', 'danger')
-            return redirect(url_for('dashboard'))
-        b = db.execute(
-            'SELECT * FROM benefits WHERE id = ? AND card_id = ?',
-            (id, uc_row['card_id'])).fetchone()
-    else:
-        # Admin path: benefit must just exist
-        b = db.execute('SELECT * FROM benefits WHERE id = ?', (id,)).fetchone()
-    if not b:
+@app.route('/admin-cards/<int:card_id>/benefits/<int:bid>/edit', methods=['GET', 'POST'])
+@admin_required
+def catalog_benefit_edit(card_id, bid):
+    """Admin-only catalog edit for a benefit. No reminder controls here —
+    those live on each user_cards instance via instance_benefit_edit."""
+    db   = get_db()
+    card = db.execute('SELECT * FROM cards WHERE id = ?', (card_id,)).fetchone()
+    b    = db.execute('SELECT * FROM benefits WHERE id = ? AND card_id = ?',
+                       (bid, card_id)).fetchone()
+    if not card or not b:
         db.close()
         flash('Benefit not found.', 'danger')
+        return redirect(url_for('card_templates'))
+
+    if request.method == 'POST':
+        name            = request.form.get('name', '').strip()
+        description     = request.form.get('description', '').strip() or None
+        credit_amount   = request.form.get('credit_amount', '').strip() or None
+        period_type     = request.form.get('period_type', 'monthly')
+        is_subscription = 1 if request.form.get('is_subscription') else 0
+        active          = 1 if request.form.get('active') else 0
+        if not name:
+            flash('Name is required.', 'danger')
+            db.close()
+            return render_template('admin_catalog_benefit.html', card=card, form=request.form,
+                                   benefit=b, period_labels=PERIOD_LABELS)
+        if credit_amount:
+            try:
+                credit_amount = float(credit_amount)
+            except ValueError:
+                flash('Credit amount must be a number.', 'danger')
+                db.close()
+                return render_template('admin_catalog_benefit.html', card=card, form=request.form,
+                                       benefit=b, period_labels=PERIOD_LABELS)
+        db.execute(
+            'UPDATE benefits SET name=?, description=?, credit_amount=?, period_type=?, is_subscription=?, '
+            'active=? WHERE id=?',
+            (name, description, credit_amount, period_type, is_subscription, active, bid))
+        db.commit()
+        db.close()
+        flash(f'Benefit "{name}" updated.', 'success')
+        return redirect(url_for('catalog_card_edit', card_id=card_id))
+
+    db.close()
+    return render_template('admin_catalog_benefit.html', card=card, form=dict(b),
+                           benefit=b, period_labels=PERIOD_LABELS)
+
+
+@app.route('/admin-cards/<int:card_id>/benefits/<int:bid>/delete', methods=['POST'])
+@admin_required
+def catalog_benefit_delete(card_id, bid):
+    db  = get_db()
+    row = db.execute('SELECT name FROM benefits WHERE id = ? AND card_id = ?', (bid, card_id)).fetchone()
+    if row:
+        db.execute('DELETE FROM benefits WHERE id = ?', (bid,))
+        db.commit()
+        flash(f'Benefit "{row["name"]}" deleted from catalog.', 'success')
+    db.close()
+    return redirect(url_for('catalog_card_edit', card_id=card_id))
+
+
+@app.route('/cards/<int:uc_id>/benefits/<int:bid>/edit', methods=['GET', 'POST'])
+@login_required
+def instance_benefit_edit(uc_id, bid):
+    """Per-instance reminder editor. Anyone with this user_cards row can set
+    their own reminder schedule for a benefit on it. Catalog fields render
+    read-only for context — only reminders are editable."""
+    db  = get_db()
+    uid = g.user['id']
+    uc_row = db.execute(
+        'SELECT id, card_id, nickname FROM user_cards WHERE id = ? AND user_id = ?',
+        (uc_id, uid)).fetchone()
+    if not uc_row:
+        db.close()
+        flash('Card instance not found.', 'danger')
         return redirect(url_for('dashboard'))
+    b = db.execute('SELECT * FROM benefits WHERE id = ? AND card_id = ?',
+                    (bid, uc_row['card_id'])).fetchone()
+    if not b:
+        db.close()
+        flash('Benefit not found on this card.', 'danger')
+        return redirect(url_for('card_detail', id=uc_id))
     card = db.execute('SELECT * FROM cards WHERE id = ?', (b['card_id'],)).fetchone()
 
-    def _save_reminders(uc_id, reminder_days, custom_day):
+    if request.method == 'POST':
+        reminder_days = request.form.getlist('reminder_days')
+        custom_day    = request.form.get('custom_reminder_day', '').strip()
         db.execute('DELETE FROM reminders WHERE user_card_id = ? AND benefit_id = ?',
-                   (uc_id, id))
+                   (uc_id, bid))
         for d in reminder_days:
             try:
                 db.execute(
                     'INSERT OR IGNORE INTO reminders (user_card_id, benefit_id, days_before) VALUES (?, ?, ?)',
-                    (uc_id, id, int(d)))
+                    (uc_id, bid, int(d)))
             except ValueError:
                 pass
         if custom_day:
             try:
                 db.execute(
                     'INSERT OR IGNORE INTO reminders (user_card_id, benefit_id, days_before) VALUES (?, ?, ?)',
-                    (uc_id, id, int(custom_day)))
+                    (uc_id, bid, int(custom_day)))
             except ValueError:
                 pass
-
-    if request.method == 'POST':
-        reminder_days = request.form.getlist('reminder_days')
-        custom_day    = request.form.get('custom_reminder_day', '').strip()
-
-        if is_admin and not target_uc:
-            # Admin catalog edit path
-            name            = request.form.get('name', '').strip()
-            description     = request.form.get('description', '').strip() or None
-            credit_amount   = request.form.get('credit_amount', '').strip() or None
-            period_type     = request.form.get('period_type', 'monthly')
-            is_subscription = 1 if request.form.get('is_subscription') else 0
-            active          = 1 if request.form.get('active') else 0
-
-            if not name:
-                flash('Name is required.', 'danger')
-                db.close()
-                return render_template('benefits/form.html', card=card, form=request.form,
-                                       benefit=b, period_labels=PERIOD_LABELS)
-
-            if credit_amount:
-                try:
-                    credit_amount = float(credit_amount)
-                except ValueError:
-                    flash('Credit amount must be a number.', 'danger')
-                    db.close()
-                    return render_template('benefits/form.html', card=card, form=request.form,
-                                           benefit=b, period_labels=PERIOD_LABELS)
-
-            db.execute(
-                'UPDATE benefits SET name=?, description=?, credit_amount=?, period_type=?, is_subscription=?, '
-                'active=? WHERE id=?',
-                (name, description, credit_amount, period_type, is_subscription, active, id))
-            # Apply admin's reminder choices to every instance they hold of this card
-            my_ucs = [r['id'] for r in db.execute(
-                'SELECT id FROM user_cards WHERE user_id = ? AND card_id = ?',
-                (uid, b['card_id'])).fetchall()]
-            for my_uc in my_ucs:
-                _save_reminders(my_uc, reminder_days, custom_day)
-            db.commit()
-            db.close()
-            flash(f'Benefit "{name}" updated.', 'success')
-            next_url = request.form.get('_next') or url_for('catalog_card_edit', card_id=b['card_id'])
-            return redirect(next_url)
-
-        # Non-admin (or admin with explicit ?uc): per-instance reminders only
-        if not target_uc:
-            db.close()
-            flash('Could not determine which card instance to update.', 'danger')
-            return redirect(url_for('dashboard'))
-        _save_reminders(target_uc, reminder_days, custom_day)
         db.commit()
         db.close()
         flash(f'Reminders for "{b["name"]}" updated.', 'success')
-        next_url = request.form.get('_next') or url_for('card_detail', id=target_uc)
-        return redirect(next_url)
+        return redirect(url_for('card_detail', id=uc_id))
 
-    # GET — render form
-    reminder_uc = target_uc
-    if reminder_uc is None and is_admin:
-        # Admin without ?uc: pull their own first instance for reminder display
-        own = db.execute(
-            'SELECT id FROM user_cards WHERE user_id = ? AND card_id = ? ORDER BY id LIMIT 1',
-            (uid, b['card_id'])).fetchone()
-        reminder_uc = own['id'] if own else None
-    existing_days = []
-    if reminder_uc is not None:
-        existing_days = [r['days_before'] for r in db.execute(
-            'SELECT days_before FROM reminders WHERE user_card_id = ? AND benefit_id = ?',
-            (reminder_uc, id)
-        ).fetchall()]
-    form_data = dict(b)
+    existing_days = [r['days_before'] for r in db.execute(
+        'SELECT days_before FROM reminders WHERE user_card_id = ? AND benefit_id = ?',
+        (uc_id, bid)
+    ).fetchall()]
     db.close()
-    return render_template('benefits/form.html', card=card, form=form_data,
-                           benefit=b, existing_reminder_days=existing_days,
-                           period_labels=PERIOD_LABELS, target_uc=target_uc)
+    return render_template('benefits/instance_edit.html',
+                           card=card, benefit=b, user_card_id=uc_id,
+                           uc_nickname=uc_row['nickname'],
+                           existing_reminder_days=existing_days,
+                           period_labels=PERIOD_LABELS)
 
 
 @app.route('/benefits/<int:id>/pursue-toggle', methods=['POST'])
@@ -1888,20 +1873,6 @@ def benefit_pursue_toggle(id):
     return redirect(request.referrer or url_for('dashboard'))
 
 
-@app.route('/benefits/<int:id>/delete', methods=['POST'])
-@admin_required
-def benefit_delete(id):
-    db  = get_db()
-    row = db.execute('SELECT card_id, name FROM benefits WHERE id = ?', (id,)).fetchone()
-    if row:
-        cid = row['card_id']
-        db.execute('DELETE FROM benefits WHERE id = ?', (id,))
-        db.commit()
-        flash(f'Benefit "{row["name"]}" deleted.', 'success')
-        db.close()
-        return redirect(url_for('catalog_card_edit', card_id=cid))
-    db.close()
-    return redirect(url_for('dashboard'))
 
 
 # ── Redemptions ────────────────────────────────────────────────────────────────
@@ -2199,7 +2170,8 @@ def benefit_redemptions(id):
     return render_template('benefits/redemptions.html', benefit=enriched,
                            period_history=period_history, period_states=period_states,
                            redemptions=list(all_redemptions),
-                           older_periods=older_periods, has_older=has_older, show_all=show_all)
+                           older_periods=older_periods, has_older=has_older, show_all=show_all,
+                           user_card_id=target_uc)
 
 
 # ── Settings ───────────────────────────────────────────────────────────────────
