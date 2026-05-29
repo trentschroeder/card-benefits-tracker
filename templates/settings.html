@@ -38,22 +38,22 @@
 
   <div class="col-lg-5">
     <div class="card p-4">
-      <h5 class="mb-3"><i class="bi bi-envelope-paper me-2"></i>Send Summary Email</h5>
+      <h5 class="mb-3"><i class="bi bi-envelope-paper me-2"></i>Send Test Summary</h5>
       <p class="text-muted small">
-        Sends outstanding benefits to each card's owner email.
-        Leave the field below blank to use those addresses, or enter an override
-        to receive everything in one email — useful for testing.
+        Send a summary of <em>your</em> outstanding benefits to an override address —
+        useful for verifying SMTP is set up correctly without touching other users.
         Subscription benefits and fully-used credits are excluded.
+        Other users send their own summary via <a href="{{ url_for('preferences') }}">Preferences</a>.
       </p>
       <form method="post" action="{{ url_for('send_summary') }}">
         <div class="mb-3">
-          <label class="form-label">Override recipient (optional)</label>
+          <label class="form-label">Override recipient</label>
           <input name="test_recipient" type="email" class="form-control"
-                 placeholder="override@example.com">
-          <div class="form-text">If set, all cards are combined into one email sent here instead of to each card's owner.</div>
+                 placeholder="override@example.com" required>
+          <div class="form-text">The email is sent only to this address.</div>
         </div>
         <button class="btn btn-outline-primary">
-          <i class="bi bi-send me-1"></i>Send Summary Now
+          <i class="bi bi-send me-1"></i>Send Test Summary
         </button>
       </form>
     </div>
@@ -62,9 +62,9 @@
       <h5 class="mb-3"><i class="bi bi-info-circle me-2"></i>How Reminders Work</h5>
       <ul class="small text-muted mb-0">
         <li class="mb-1">Each benefit can have one or more reminder triggers (e.g., 7 days, 3 days, 1 day before period end).</li>
-        <li class="mb-1">An email is sent when today matches a trigger <em>and</em> the benefit still has unused credit.</li>
-        <li class="mb-1">Once the credit is fully used, no further reminders are sent for that period.</li>
-        <li>Each trigger fires at most once per period.</li>
+        <li class="mb-1">An email is sent to each user's notification address when today matches a trigger <em>and</em> they still have unused credit on that benefit.</li>
+        <li class="mb-1">Users can turn reminders off entirely from their Preferences page.</li>
+        <li>Each trigger fires at most once per user per period.</li>
       </ul>
     </div>
   </div>

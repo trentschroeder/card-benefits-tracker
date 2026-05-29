@@ -700,6 +700,32 @@
   {% block head %}{% endblock %}
 </head>
 <body>
+{% if g.impersonator %}
+<div class="impersonation-banner">
+  <i class="bi bi-incognito me-2"></i>
+  <span>Acting as <strong>{{ g.user.email }}</strong> (admin: {{ g.impersonator.email }})</span>
+  <form method="post" action="{{ url_for('impersonate_stop') }}" class="d-inline ms-2">
+    <button class="btn btn-sm btn-light">
+      <i class="bi bi-x-circle me-1"></i>Exit impersonation
+    </button>
+  </form>
+</div>
+<style>
+  .impersonation-banner {
+    background: linear-gradient(90deg, #c0392b, #8b1e1e);
+    color: #fff;
+    text-align: center;
+    padding: .55rem 1rem;
+    font-weight: 500;
+    font-size: .95rem;
+    border-bottom: 2px solid #6e1818;
+    position: sticky;
+    top: 0;
+    z-index: 1031;
+  }
+  .impersonation-banner .btn-light { font-size: .8rem; padding: .15rem .55rem; }
+</style>
+{% endif %}
 <nav class="navbar navbar-expand-lg mb-4">
   <div class="container-lg">
     <a class="navbar-brand fw-bold" href="{{ url_for('dashboard') }}">
@@ -723,12 +749,34 @@
           </a>
         </li>
         <li class="nav-item">
+          <a class="nav-link {% if request.path == '/card-templates' %}active{% endif %}"
+             href="{{ url_for('card_templates') }}">
+            <i class="bi bi-collection me-1"></i>Card Templates
+          </a>
+        </li>
+        {% if g.user %}
+        <li class="nav-item">
+          <a class="nav-link {% if request.path == '/preferences' %}active{% endif %}"
+             href="{{ url_for('preferences') }}">
+            <i class="bi bi-person-gear me-1"></i>Preferences
+          </a>
+        </li>
+        {% endif %}
+        {% if g.user and g.user.is_admin %}
+        <li class="nav-item">
+          <a class="nav-link {% if request.path.startswith('/users') %}active{% endif %}"
+             href="{{ url_for('users_list') }}">
+            <i class="bi bi-people me-1"></i>Users
+          </a>
+        </li>
+        <li class="nav-item">
           <a class="nav-link {% if request.path == '/settings' %}active{% endif %}"
              href="{{ url_for('settings') }}">
             <i class="bi bi-gear me-1"></i>Settings
           </a>
         </li>
-        {% if session.get('logged_in') %}
+        {% endif %}
+        {% if g.user %}
         <li class="nav-item">
           <a class="nav-link" href="{{ url_for('logout') }}">
             <i class="bi bi-box-arrow-right me-1"></i>Logout
@@ -769,12 +817,31 @@
     <i class="bi bi-credit-card"></i>
     <span>Cards</span>
   </a>
+  <a class="tab-item {% if request.path == '/card-templates' %}active{% endif %}"
+     href="{{ url_for('card_templates') }}">
+    <i class="bi bi-collection"></i>
+    <span>Templates</span>
+  </a>
+  {% if g.user %}
+  <a class="tab-item {% if request.path == '/preferences' %}active{% endif %}"
+     href="{{ url_for('preferences') }}">
+    <i class="bi bi-person-gear"></i>
+    <span>Prefs</span>
+  </a>
+  {% endif %}
+  {% if g.user and g.user.is_admin %}
+  <a class="tab-item {% if request.path.startswith('/users') %}active{% endif %}"
+     href="{{ url_for('users_list') }}">
+    <i class="bi bi-people"></i>
+    <span>Users</span>
+  </a>
   <a class="tab-item {% if request.path == '/settings' %}active{% endif %}"
      href="{{ url_for('settings') }}">
     <i class="bi bi-gear"></i>
     <span>Settings</span>
   </a>
-  {% if session.get('logged_in') %}
+  {% endif %}
+  {% if g.user %}
   <a class="tab-item" href="{{ url_for('logout') }}">
     <i class="bi bi-box-arrow-right"></i>
     <span>Logout</span>

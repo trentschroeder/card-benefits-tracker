@@ -11,6 +11,9 @@
       </p>
 
       <form method="post">
+
+        {% if g.user.is_admin %}
+        {# Admin: full catalog edit form #}
         <div class="mb-3">
           <label class="form-label">Benefit Name <span class="text-danger">*</span></label>
           <input name="name" type="text" class="form-control"
@@ -46,7 +49,6 @@
           <div class="form-text">Periods align to the calendar (monthly = 1st of month; quarterly = Jan/Apr/Jul/Oct; semi-annual = Jan/Jul; annual = Jan–Dec).</div>
         </div>
 
-        <!-- Subscription toggle -->
         <div class="mb-3">
           <div class="form-check form-switch">
             <input name="is_subscription" type="checkbox" class="form-check-input" id="isSubscription"
@@ -59,8 +61,38 @@
           </div>
           <div class="form-text">Marks this benefit as a subscription. Recording a redemption then lets you pick a month range so one row is added per period.</div>
         </div>
+        {% else %}
+        {# Non-admin: catalog fields are read-only #}
+        <div class="bg-body-tertiary p-3 rounded mb-4" style="background: var(--bg-table-head) !important;">
+          <p class="text-muted small mb-2"><i class="bi bi-info-circle me-1"></i>Catalog details (set by admin, read-only)</p>
+          <div class="mb-2">
+            <div class="text-muted small">Name</div>
+            <div class="fw-semibold">{{ form.get('name', '') }}</div>
+          </div>
+          {% if form.get('description') %}
+          <div class="mb-2">
+            <div class="text-muted small">Description</div>
+            <div>{{ form.get('description') }}</div>
+          </div>
+          {% endif %}
+          <div class="row">
+            <div class="col-sm-4 mb-2">
+              <div class="text-muted small">Credit Amount</div>
+              <div>{% if form.get('credit_amount') %}${{ "%.2f"|format(form.get('credit_amount')) }}{% else %}<span class="text-muted">—</span>{% endif %}</div>
+            </div>
+            <div class="col-sm-4 mb-2">
+              <div class="text-muted small">Renewal Period</div>
+              <div>{{ period_labels.get(form.get('period_type', 'monthly')) }}</div>
+            </div>
+            <div class="col-sm-4 mb-2">
+              <div class="text-muted small">Type</div>
+              <div>{% if form.get('is_subscription') %}<i class="bi bi-arrow-repeat me-1 text-success"></i>Subscription{% else %}Standard{% endif %}</div>
+            </div>
+          </div>
+        </div>
+        {% endif %}
 
-        <!-- Reminder schedule -->
+        <!-- Reminder schedule (per-user for everyone) -->
         <div class="mb-3" id="reminderSection"
              style="opacity: {% if form.get('is_subscription') %}0.4{% else %}1{% endif %}">
           <label class="form-label"><i class="bi bi-bell me-1"></i>Email Reminders</label>
@@ -86,14 +118,19 @@
         <div class="mb-3 form-check">
           <input name="active" type="checkbox" class="form-check-input" id="activeCheck"
                  {% if form.get('active', 1) %}checked{% endif %}>
-          <label class="form-check-label" for="activeCheck">Active</label>
+          <label class="form-check-label" for="activeCheck">
+            {% if g.user.is_admin %}Active in catalog{% else %}Show on my dashboard{% endif %}
+          </label>
+          {% if not g.user.is_admin %}
+          <div class="form-text">When off, this benefit is hidden from your dashboard and skipped in reminder/summary emails. Your redemption history is preserved.</div>
+          {% endif %}
         </div>
         {% endif %}
 
         <div class="d-flex gap-2 mt-4">
           <button class="btn btn-primary">Save</button>
           <a href="{{ url_for('card_detail', id=card.id) }}" class="btn btn-outline-secondary">Cancel</a>
-          {% if benefit %}
+          {% if benefit and g.user.is_admin %}
           <button type="button" class="btn btn-outline-danger ms-auto"
                   data-bs-toggle="modal" data-bs-target="#deleteBenefitModal">
             <i class="bi bi-trash me-1"></i>Delete
@@ -105,7 +142,7 @@
   </div>
 </div>
 
-{% if benefit %}
+{% if benefit and g.user.is_admin %}
 <div class="modal fade" id="deleteBenefitModal" tabindex="-1">
   <div class="modal-dialog modal-sm">
     <div class="modal-content">

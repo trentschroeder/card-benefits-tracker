@@ -377,7 +377,13 @@
 {% if not dashboard_cards %}
 <div class="text-center py-5 text-muted">
   <i class="bi bi-credit-card display-4 mb-3 d-block"></i>
-  No cards yet. <a href="{{ url_for('card_new') }}">Add your first card</a> to get started.
+  {% if g.user.is_admin %}
+    No cards yet. <a href="{{ url_for('card_new') }}">Add your first card</a>
+    or browse the <a href="{{ url_for('card_templates') }}">Card Templates</a> to get started.
+  {% else %}
+    No cards on your dashboard yet.
+    Browse the <a href="{{ url_for('card_templates') }}">Card Templates</a> to add one.
+  {% endif %}
 </div>
 {% endif %}
 

@@ -1,0 +1,43 @@
+{% extends 'base.html' %}
+{% block title %}Set up your account — Card Benefits{% endblock %}
+{% block content %}
+
+<div class="row justify-content-center mt-5">
+  <div class="col-sm-8 col-md-6 col-lg-5">
+    <div class="card p-4">
+      {% if invalid %}
+        <h4 class="mb-3"><i class="bi bi-exclamation-triangle text-danger me-2"></i>Invitation invalid</h4>
+        <p class="text-muted">
+          This invitation link is no longer valid — it may have been used already,
+          expired, or revoked when a newer invite was sent. Ask the administrator
+          to send you a fresh invite.
+        </p>
+        <a href="{{ url_for('login') }}" class="btn btn-outline-secondary mt-2">Go to sign in</a>
+      {% else %}
+        <h4 class="mb-3"><i class="bi bi-person-check me-2"></i>Set up your account</h4>
+        <p class="text-muted">
+          Welcome! Choose a password for <strong>{{ email }}</strong> and you'll be signed in.
+        </p>
+        {% if error %}
+          <div class="alert alert-danger">{{ error }}</div>
+        {% endif %}
+        <form method="post">
+          <div class="mb-3">
+            <label class="form-label">New password</label>
+            <input name="password" type="password" class="form-control"
+                   autocomplete="new-password" autofocus required minlength="8">
+            <div class="form-text">At least 8 characters.</div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Confirm password</label>
+            <input name="confirm_password" type="password" class="form-control"
+                   autocomplete="new-password" required minlength="8">
+          </div>
+          <button class="btn btn-primary w-100">Activate account</button>
+        </form>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+{% endblock %}

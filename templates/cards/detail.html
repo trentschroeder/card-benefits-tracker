@@ -5,9 +5,14 @@
 <div class="d-flex align-items-center gap-2 mb-4">
   <h2 class="mb-0">{{ card.name }}</h2>
   {% if not card.active %}<span class="badge bg-secondary">Inactive</span>{% endif %}
+  <button type="button" class="btn btn-outline-secondary btn-sm ms-auto"
+          data-bs-toggle="modal" data-bs-target="#removeCardModal">
+    <i class="bi bi-dash-circle me-1"></i>Remove from my dashboard
+  </button>
 </div>
 
-<!-- Edit card -->
+<!-- Edit card (admin only) -->
+{% if g.user.is_admin %}
 <details class="card p-3 mb-4">
   <summary class="fw-semibold" style="cursor:pointer;list-style:none;">
     <i class="bi bi-pencil me-1"></i>Edit Card Details
@@ -23,16 +28,16 @@
         <input name="annual_fee" type="number" step="0.01" min="0" class="form-control"
                value="{{ card.annual_fee or '' }}" placeholder="e.g. 695">
       </div>
-      <div class="col-sm-8">
-        <label class="form-label">Owner Email</label>
-        <input name="owner_email" type="email" class="form-control"
-               value="{{ card.owner_email or '' }}" placeholder="cardowner@example.com">
-        <div class="form-text">Reminders for this card go here (falls back to global recipient if blank).</div>
-      </div>
       <div class="col-12 form-check ms-1">
         <input name="active" type="checkbox" class="form-check-input" id="activeCheck"
                {% if card.active %}checked{% endif %}>
         <label class="form-check-label" for="activeCheck">Active</label>
+      </div>
+      <div class="col-12 form-check ms-1">
+        <input name="published" type="checkbox" class="form-check-input" id="publishedCheck"
+               {% if card.published %}checked{% endif %}>
+        <label class="form-check-label" for="publishedCheck">Published</label>
+        <div class="form-text">When on, this card appears in Card Templates for other users to add to their dashboards.</div>
       </div>
     </div>
     <div class="d-flex gap-2 mt-3">
@@ -44,17 +49,26 @@
     </div>
   </form>
 </details>
+{% endif %}
 
 <!-- Benefits list -->
 <div class="d-flex justify-content-between align-items-center mb-3">
   <h4 class="mb-0">Benefits</h4>
+  {% if g.user.is_admin %}
   <a href="{{ url_for('benefit_new', card_id=card.id) }}" class="btn btn-primary btn-sm">
     <i class="bi bi-plus-lg me-1"></i>Add Benefit
   </a>
+  {% endif %}
 </div>
 
 {% if not benefits %}
-  <div class="text-muted">No benefits yet. <a href="{{ url_for('benefit_new', card_id=card.id) }}">Add one</a>.</div>
+  <div class="text-muted">
+    {% if g.user.is_admin %}
+      No benefits yet. <a href="{{ url_for('benefit_new', card_id=card.id) }}">Add one</a>.
+    {% else %}
+      No benefits configured on this card yet.
+    {% endif %}
+  </div>
 {% else %}
 <div class="table-responsive">
   <table class="table table-hover align-middle">
@@ -106,10 +120,12 @@
           {% if b.reminder_days %}{{ b.reminder_days | join(', ') }}d{% else %}—{% endif %}
         </td>
         <td>
-          {% if b.fully_used %}
-            <span class="badge bg-success">Done</span>
-          {% elif not b.active %}
+          {% if not b.active %}
             <span class="badge bg-secondary">Inactive</span>
+          {% elif b.user_active == 0 %}
+            <span class="badge bg-secondary">Hidden by you</span>
+          {% elif b.fully_used %}
+            <span class="badge bg-success">Done</span>
           {% else %}
             <span class="badge bg-danger">Pending</span>
           {% endif %}
@@ -119,7 +135,8 @@
             <a href="{{ url_for('benefit_redemptions', id=b.id) }}" class="btn btn-outline-secondary btn-sm" title="History">
               <i class="bi bi-clock-history"></i>
             </a>
-            <a href="{{ url_for('benefit_edit', id=b.id) }}" class="btn btn-outline-secondary btn-sm" title="Edit">
+            <a href="{{ url_for('benefit_edit', id=b.id) }}" class="btn btn-outline-secondary btn-sm"
+               title="{% if g.user.is_admin %}Edit{% else %}Edit my preferences{% endif %}">
               <i class="bi bi-pencil"></i>
             </a>
           </div>
@@ -131,7 +148,29 @@
 </div>
 {% endif %}
 
-<!-- Delete card modal -->
+<!-- Remove from dashboard modal (all users) -->
+<div class="modal fade" id="removeCardModal" tabindex="-1">
+  <div class="modal-dialog modal-sm">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h6 class="modal-title">Remove from dashboard</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        Remove <strong>{{ card.name }}</strong> from your dashboard? Your redemption history is preserved — you can re-add the card from Card Templates anytime.
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+        <form method="post" action="{{ url_for('card_remove', id=card.id) }}">
+          <button class="btn btn-primary btn-sm">Remove</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Delete card modal (admin only — wipes from templates and every user's dashboard) -->
+{% if g.user.is_admin %}
 <div class="modal fade" id="deleteCardModal" tabindex="-1">
   <div class="modal-dialog modal-sm">
     <div class="modal-content">
@@ -151,5 +190,6 @@
     </div>
   </div>
 </div>
+{% endif %}
 
 {% endblock %}

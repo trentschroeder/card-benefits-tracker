@@ -18,12 +18,6 @@
                  value="{{ form.get('annual_fee', '') }}" placeholder="e.g. 695" style="max-width:160px;">
           <div class="form-text">Used to track when the card pays for itself.</div>
         </div>
-        <div class="mb-3">
-          <label class="form-label">Owner Email</label>
-          <input name="owner_email" type="email" class="form-control"
-                 value="{{ form.get('owner_email', '') }}" placeholder="cardowner@example.com">
-          <div class="form-text">Reminder and summary emails for this card go here. Falls back to the global recipient in Settings if blank.</div>
-        </div>
         {% if form.get('id') %}
         <div class="mb-3 form-check">
           <input name="active" type="checkbox" class="form-check-input" id="activeCheck"
@@ -31,6 +25,12 @@
           <label class="form-check-label" for="activeCheck">Active</label>
         </div>
         {% endif %}
+        <div class="mb-3 form-check">
+          <input name="published" type="checkbox" class="form-check-input" id="publishedCheck"
+                 {% if form.get('published') %}checked{% endif %}>
+          <label class="form-check-label" for="publishedCheck">Published</label>
+          <div class="form-text">When on, this card appears in Card Templates for other users to add to their dashboards.</div>
+        </div>
         <div class="d-flex gap-2">
           <button class="btn btn-primary">Save</button>
           <a href="{{ url_for('cards_list') }}" class="btn btn-outline-secondary">Cancel</a>

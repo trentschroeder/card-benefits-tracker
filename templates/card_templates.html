@@ -1,0 +1,70 @@
+{% extends 'base.html' %}
+{% block title %}Card Templates — Card Benefits{% endblock %}
+{% block content %}
+
+<div class="d-flex justify-content-between align-items-center mb-4">
+  <h2 class="mb-0"><i class="bi bi-collection me-2"></i>Card Templates</h2>
+  <a href="{{ url_for('cards_list') }}" class="btn btn-outline-secondary btn-sm">
+    <i class="bi bi-arrow-left me-1"></i>Back to My Cards
+  </a>
+</div>
+
+<p class="text-muted">Published card templates your administrator has made available. Add one to your dashboard to start tracking its benefits.</p>
+
+{% if not cards %}
+  <div class="text-center py-5 text-muted">
+    <i class="bi bi-collection display-4 mb-3 d-block"></i>
+    No card templates published yet.
+  </div>
+{% else %}
+<div class="table-responsive">
+  <table class="table table-hover align-middle">
+    <thead>
+      <tr>
+        <th>Card</th>
+        <th>Benefits</th>
+        <th>Annual Fee</th>
+        <th>Status</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for c in cards %}
+      <tr>
+        <td class="fw-semibold">{{ c.name }}</td>
+        <td>{{ c.benefit_count }}</td>
+        <td>{% if c.annual_fee %}${{ "%.2f"|format(c.annual_fee) }}{% else %}<span class="text-muted">—</span>{% endif %}</td>
+        <td>
+          {% if c.user_active == 1 %}
+            <span class="badge bg-success">On your dashboard</span>
+          {% elif c.user_active == 0 %}
+            <span class="badge bg-secondary">Previously removed</span>
+          {% else %}
+            <span class="badge bg-secondary">Available</span>
+          {% endif %}
+        </td>
+        <td class="text-end">
+          {% if c.user_active == 1 %}
+            <a href="{{ url_for('card_detail', id=c.id) }}" class="btn btn-outline-secondary btn-sm">
+              <i class="bi bi-arrow-right me-1"></i>View
+            </a>
+          {% else %}
+          <form method="post" action="{{ url_for('card_templates_add', card_id=c.id) }}" class="d-inline">
+            <button class="btn btn-primary btn-sm">
+              {% if c.user_active == 0 %}
+                <i class="bi bi-arrow-counterclockwise me-1"></i>Re-add
+              {% else %}
+                <i class="bi bi-plus-lg me-1"></i>Add to my cards
+              {% endif %}
+            </button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+{% endblock %}

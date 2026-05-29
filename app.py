@@ -1,13 +1,16 @@
+import hashlib
 import os
+import secrets
 import sqlite3
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 
-from flask import (Flask, flash, jsonify, redirect, render_template,
+from flask import (Flask, flash, g, jsonify, redirect, render_template,
                    request, send_from_directory, session, url_for)
-from werkzeug.security import check_password_hash
+from werkzeug.security import check_password_hash, generate_password_hash
 
 from periods import get_current_period, days_left, PERIOD_LABELS
-from email_sender import send_reminder_email, send_summary_email
+from email_sender import (send_reminder_email, send_summary_email,
+                           send_invite_email, send_reset_email)
 
 app = Flask(__name__)
 
@@ -36,8 +39,24 @@ def login_required(f):
     from functools import wraps
     @wraps(f)
     def decorated(*args, **kwargs):
-        if not session.get('logged_in'):
+        if not g.get('user'):
             return redirect(url_for('login', next=request.path))
+        return f(*args, **kwargs)
+    return decorated
+
+
+def admin_required(f):
+    """Gate a route to admin users only. Assumes login_required already ran
+    or is composed after this one — if not, will redirect to /login."""
+    from functools import wraps
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        u = g.get('user')
+        if not u:
+            return redirect(url_for('login', next=request.path))
+        if not u['is_admin']:
+            flash('Admin access required.', 'danger')
+            return redirect(url_for('dashboard'))
         return f(*args, **kwargs)
     return decorated
 
@@ -72,7 +91,10 @@ def init_db():
     except Exception:
         pass
     try:
-        db.execute('ALTER TABLE cards ADD COLUMN owner_email TEXT')
+        db.execute('ALTER TABLE cards ADD COLUMN published INTEGER NOT NULL DEFAULT 0')
+        # First-time backfill: every pre-existing card was the only template
+        # library before the published flag existed, so consider them all published.
+        db.execute('UPDATE cards SET published = 1')
         db.commit()
     except Exception:
         pass
@@ -81,9 +103,194 @@ def init_db():
         db.commit()
     except Exception:
         pass
+    # Phase 5: recipient becomes a per-user thing, so card.owner_email is dropped.
+    try:
+        db.execute('ALTER TABLE cards DROP COLUMN owner_email')
+        db.commit()
+    except Exception:
+        pass
+    for col, decl in [
+        ('notification_email', 'TEXT'),
+        ('reminders_enabled',  'INTEGER NOT NULL DEFAULT 1'),
+        ('summary_enabled',    'INTEGER NOT NULL DEFAULT 1'),
+    ]:
+        try:
+            db.execute(f'ALTER TABLE users ADD COLUMN {col} {decl}')
+            db.commit()
+        except Exception:
+            pass
+    try:
+        db.execute("ALTER TABLE invitations ADD COLUMN purpose TEXT NOT NULL DEFAULT 'invite'")
+        db.commit()
+    except Exception:
+        pass
     _migrate_subscriptions_to_redemptions(db)
     _drop_last_subscription_period_if_exists(db)
+    _migrate_credentials_file_to_users(db)
+    _migrate_scope_data_to_users(db)
+    _ensure_user_scoped_indexes(db)
     db.close()
+
+
+def _ensure_user_scoped_indexes(db):
+    """Create indexes that reference user_id. Must run AFTER the Phase 2
+    migration has added the user_id column on existing dbs."""
+    db.execute('CREATE INDEX IF NOT EXISTS idx_redemptions_lookup ON redemptions(user_id, benefit_id, period_start)')
+    db.execute('CREATE INDEX IF NOT EXISTS idx_reminders_benefit  ON reminders(user_id, benefit_id)')
+    db.execute('CREATE INDEX IF NOT EXISTS idx_sent_reminders     ON sent_reminders(user_id, benefit_id, period_start)')
+    db.commit()
+
+
+def _migrate_scope_data_to_users(db):
+    """Phase 2: thread user_id through redemptions/reminders/sent_reminders,
+    and populate user_cards from the existing cards. All operations are
+    idempotent and skip if no admin user exists yet (fresh install)."""
+    admin_row = db.execute(
+        'SELECT id FROM users WHERE is_admin = 1 ORDER BY id LIMIT 1'
+    ).fetchone()
+    if not admin_row:
+        return
+    admin_id = admin_row['id']
+
+    _migrate_redemptions_add_user_id(db, admin_id)
+    _migrate_reminders_to_per_user(db, admin_id)
+    _migrate_sent_reminders_to_per_user(db, admin_id)
+    _populate_user_cards_for_admin(db, admin_id)
+
+
+def _migrate_redemptions_add_user_id(db, admin_id):
+    cols = {r[1] for r in db.execute('PRAGMA table_info(redemptions)').fetchall()}
+    if 'user_id' in cols:
+        return
+    # SQLite can't add a NOT NULL column without a default; add nullable, backfill,
+    # then rebuild the table to enforce NOT NULL + FK.
+    db.execute('ALTER TABLE redemptions ADD COLUMN user_id INTEGER')
+    db.execute('UPDATE redemptions SET user_id = ? WHERE user_id IS NULL', (admin_id,))
+    db.commit()
+    db.execute('PRAGMA foreign_keys = OFF')
+    try:
+        db.execute('''
+            CREATE TABLE redemptions_new (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id      INTEGER NOT NULL,
+                benefit_id   INTEGER NOT NULL,
+                period_start DATE    NOT NULL,
+                amount       REAL,
+                notes        TEXT,
+                redeemed_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id)    REFERENCES users(id)    ON DELETE CASCADE,
+                FOREIGN KEY (benefit_id) REFERENCES benefits(id) ON DELETE CASCADE
+            )
+        ''')
+        db.execute('''
+            INSERT INTO redemptions_new (id, user_id, benefit_id, period_start, amount, notes, redeemed_at)
+            SELECT id, user_id, benefit_id, period_start, amount, notes, redeemed_at FROM redemptions
+        ''')
+        db.execute('DROP TABLE redemptions')
+        db.execute('ALTER TABLE redemptions_new RENAME TO redemptions')
+        db.commit()
+    finally:
+        db.execute('PRAGMA foreign_keys = ON')
+
+
+def _migrate_reminders_to_per_user(db, admin_id):
+    cols = {r[1] for r in db.execute('PRAGMA table_info(reminders)').fetchall()}
+    if 'user_id' in cols:
+        return
+    db.commit()
+    db.execute('PRAGMA foreign_keys = OFF')
+    try:
+        db.execute('''
+            CREATE TABLE reminders_new (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id     INTEGER NOT NULL,
+                benefit_id  INTEGER NOT NULL,
+                days_before INTEGER NOT NULL,
+                UNIQUE(user_id, benefit_id, days_before),
+                FOREIGN KEY (user_id)    REFERENCES users(id)    ON DELETE CASCADE,
+                FOREIGN KEY (benefit_id) REFERENCES benefits(id) ON DELETE CASCADE
+            )
+        ''')
+        db.execute('''
+            INSERT INTO reminders_new (id, user_id, benefit_id, days_before)
+            SELECT id, ?, benefit_id, days_before FROM reminders
+        ''', (admin_id,))
+        db.execute('DROP TABLE reminders')
+        db.execute('ALTER TABLE reminders_new RENAME TO reminders')
+        db.commit()
+    finally:
+        db.execute('PRAGMA foreign_keys = ON')
+
+
+def _migrate_sent_reminders_to_per_user(db, admin_id):
+    cols = {r[1] for r in db.execute('PRAGMA table_info(sent_reminders)').fetchall()}
+    if 'user_id' in cols:
+        return
+    db.commit()
+    db.execute('PRAGMA foreign_keys = OFF')
+    try:
+        db.execute('''
+            CREATE TABLE sent_reminders_new (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id      INTEGER NOT NULL,
+                benefit_id   INTEGER NOT NULL,
+                period_start DATE    NOT NULL,
+                days_before  INTEGER NOT NULL,
+                sent_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(user_id, benefit_id, period_start, days_before),
+                FOREIGN KEY (user_id)    REFERENCES users(id)    ON DELETE CASCADE,
+                FOREIGN KEY (benefit_id) REFERENCES benefits(id) ON DELETE CASCADE
+            )
+        ''')
+        db.execute('''
+            INSERT INTO sent_reminders_new (id, user_id, benefit_id, period_start, days_before, sent_at)
+            SELECT id, ?, benefit_id, period_start, days_before, sent_at FROM sent_reminders
+        ''', (admin_id,))
+        db.execute('DROP TABLE sent_reminders')
+        db.execute('ALTER TABLE sent_reminders_new RENAME TO sent_reminders')
+        db.commit()
+    finally:
+        db.execute('PRAGMA foreign_keys = ON')
+
+
+def _populate_user_cards_for_admin(db, admin_id):
+    """Make every existing card show up on the admin's dashboard. Idempotent."""
+    db.execute('''
+        INSERT INTO user_cards (user_id, card_id, active)
+        SELECT ?, id, active FROM cards
+        WHERE NOT EXISTS (
+            SELECT 1 FROM user_cards uc
+            WHERE uc.user_id = ? AND uc.card_id = cards.id
+        )
+    ''', (admin_id, admin_id))
+    db.commit()
+
+
+def _migrate_credentials_file_to_users(db):
+    """One-time backfill: if a legacy .credentials file exists and no admin
+    user is in the users table yet, insert an admin row using the file's
+    username as the email and its password hash verbatim. Idempotent."""
+    if not os.path.exists(CREDS_FILE):
+        return
+    existing_admin = db.execute(
+        'SELECT 1 FROM users WHERE is_admin = 1 LIMIT 1'
+    ).fetchone()
+    if existing_admin:
+        return
+    try:
+        with open(CREDS_FILE) as f:
+            raw = f.read().strip()
+        username, pw_hash = raw.split(':', 1)
+    except (OSError, ValueError):
+        return
+    try:
+        db.execute(
+            'INSERT INTO users (email, password_hash, is_admin) VALUES (?, ?, 1)',
+            (username, pw_hash)
+        )
+        db.commit()
+    except sqlite3.IntegrityError:
+        pass
 
 
 def _drop_last_subscription_period_if_exists(db):
@@ -166,8 +373,8 @@ def set_setting(db, key, value):
     db.execute('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)', (key, value))
 
 
-def enrich_benefit(db, benefit):
-    """Add period info and usage totals to a benefit row dict."""
+def enrich_benefit(db, benefit, user_id):
+    """Add period info and usage totals to a benefit row dict, scoped to one user."""
     b = dict(benefit)
     period_start, period_end = get_current_period(b['period_type'])
     b['period_start'] = period_start
@@ -176,8 +383,9 @@ def enrich_benefit(db, benefit):
     b['period_label'] = PERIOD_LABELS[b['period_type']]
 
     rows = db.execute(
-        'SELECT COALESCE(SUM(amount), 0) AS total FROM redemptions WHERE benefit_id = ? AND period_start = ?',
-        (b['id'], str(period_start))
+        'SELECT COALESCE(SUM(amount), 0) AS total FROM redemptions '
+        'WHERE user_id = ? AND benefit_id = ? AND period_start = ?',
+        (user_id, b['id'], str(period_start))
     ).fetchone()
     b['amount_used'] = rows['total']
 
@@ -187,16 +395,17 @@ def enrich_benefit(db, benefit):
         b['fully_used'] = b['remaining'] <= 0
     else:
         count = db.execute(
-            'SELECT COUNT(*) FROM redemptions WHERE benefit_id = ? AND period_start = ?',
-            (b['id'], str(period_start))
+            'SELECT COUNT(*) FROM redemptions '
+            'WHERE user_id = ? AND benefit_id = ? AND period_start = ?',
+            (user_id, b['id'], str(period_start))
         ).fetchone()[0]
         b['remaining']  = 0 if count > 0 else 1
         b['pct_used']   = 100 if count > 0 else 0
         b['fully_used'] = count > 0
 
     reminders = db.execute(
-        'SELECT days_before FROM reminders WHERE benefit_id = ? ORDER BY days_before DESC',
-        (b['id'],)
+        'SELECT days_before FROM reminders WHERE user_id = ? AND benefit_id = ? ORDER BY days_before DESC',
+        (user_id, b['id'])
     ).fetchall()
     b['reminder_days'] = [r['days_before'] for r in reminders]
 
@@ -206,8 +415,8 @@ def enrich_benefit(db, benefit):
 _PERIODS_PER_YEAR = {'monthly': 12, 'quarterly': 4, 'semi-annual': 2, 'annual': 1}
 
 
-def compute_card_roi(db, enriched_benefits):
-    """Return (captured, max_possible) for a card's benefits this calendar year."""
+def compute_card_roi(db, enriched_benefits, user_id):
+    """Return (captured, max_possible) for a card's benefits this calendar year, for one user."""
     year = str(date.today().year)
     captured = 0.0
     max_possible = 0.0
@@ -219,8 +428,8 @@ def compute_card_roi(db, enriched_benefits):
         max_possible += ca * ppy
         row = db.execute(
             "SELECT COALESCE(SUM(amount), 0) AS total FROM redemptions "
-            "WHERE benefit_id = ? AND strftime('%Y', period_start) = ?",
-            (b['id'], year)
+            "WHERE user_id = ? AND benefit_id = ? AND strftime('%Y', period_start) = ?",
+            (user_id, b['id'], year)
         ).fetchone()
         captured += row['total']
     return captured, max_possible
@@ -247,21 +456,62 @@ def favicon():
 
 # ── Auth ───────────────────────────────────────────────────────────────────────
 
+@app.before_request
+def _load_current_user():
+    """Resolve the effective user for this request.
+
+    Normal case: g.user is whoever's logged in. g.impersonator is None.
+
+    Impersonation case: if the actual session user is admin AND
+    session['impersonating_user_id'] is set, g.user becomes that target
+    user and g.impersonator points to the admin. Every existing scoped
+    query that reads g.user['id'] then automatically operates on the
+    impersonated user's data without further code changes.
+    """
+    g.user         = None
+    g.impersonator = None
+    uid = session.get('user_id')
+    if not uid:
+        return
+    db = get_db()
+    actual = db.execute('SELECT * FROM users WHERE id = ?', (uid,)).fetchone()
+    if not actual:
+        db.close()
+        session.clear()
+        return
+    imp_id = session.get('impersonating_user_id')
+    if imp_id and actual['is_admin']:
+        target = db.execute('SELECT * FROM users WHERE id = ?', (imp_id,)).fetchone()
+        if target:
+            g.user         = target
+            g.impersonator = actual
+            db.close()
+            return
+        # target gone — drop the impersonation
+        session.pop('impersonating_user_id', None)
+    g.user = actual
+    db.close()
+
+
 @app.route('/login', methods=['GET', 'POST'])
 def login():
-    if session.get('logged_in'):
+    if g.get('user'):
         return redirect(url_for('dashboard'))
     error = None
     if request.method == 'POST':
-        username = request.form.get('username', '')
+        email    = request.form.get('email', '').strip()
         password = request.form.get('password', '')
-        if os.path.exists(CREDS_FILE):
-            with open(CREDS_FILE) as f:
-                stored_user, stored_hash = f.read().strip().split(':', 1)
-            if username == stored_user and check_password_hash(stored_hash, password):
-                session['logged_in'] = True
+        if email and password:
+            db  = get_db()
+            row = db.execute(
+                'SELECT * FROM users WHERE email = ?', (email,)
+            ).fetchone()
+            db.close()
+            if row and check_password_hash(row['password_hash'], password):
+                session.clear()
+                session['user_id'] = row['id']
                 return redirect(request.args.get('next') or url_for('dashboard'))
-        error = 'Invalid username or password.'
+        error = 'Invalid email or password.'
     return render_template('login.html', error=error)
 
 
@@ -271,34 +521,373 @@ def logout():
     return redirect(url_for('login'))
 
 
+# ── Invitations / user management ─────────────────────────────────────────────
+
+INVITE_TTL_DAYS  = 7
+RESET_TTL_HOURS  = 24
+
+
+def _now_utc():
+    return datetime.now(timezone.utc)
+
+
+def _hash_invite_token(raw_token):
+    return hashlib.sha256(raw_token.encode()).hexdigest()
+
+
+def _ttl_for_purpose(purpose):
+    if purpose == 'reset':
+        return timedelta(hours=RESET_TTL_HOURS)
+    return timedelta(days=INVITE_TTL_DAYS)
+
+
+def _create_token(db, user_id, purpose='invite'):
+    """Generate a new one-time token for this user + purpose. Revokes any
+    prior unused tokens of the SAME purpose so only the latest is valid.
+    Token TTL varies by purpose (7 days invite, 24 hours reset)."""
+    db.execute(
+        'DELETE FROM invitations WHERE user_id = ? AND used_at IS NULL AND purpose = ?',
+        (user_id, purpose))
+    raw_token  = secrets.token_urlsafe(32)
+    token_hash = _hash_invite_token(raw_token)
+    expires_at = _now_utc() + _ttl_for_purpose(purpose)
+    db.execute(
+        'INSERT INTO invitations (user_id, token_hash, purpose, expires_at) VALUES (?, ?, ?, ?)',
+        (user_id, token_hash, purpose, expires_at.isoformat(timespec='seconds')))
+    return raw_token
+
+
+def _parse_iso_utc(s):
+    """Parse an ISO datetime string. Treat naive strings as UTC."""
+    dt = datetime.fromisoformat(s)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
+def _user_status(db, user):
+    """active | pending | expired — derived from the latest *invite* row.
+    Reset-password tokens are ignored for status display."""
+    inv = db.execute(
+        "SELECT used_at, expires_at FROM invitations "
+        "WHERE user_id = ? AND purpose = 'invite' ORDER BY id DESC LIMIT 1",
+        (user['id'],)
+    ).fetchone()
+    if not inv or inv['used_at']:
+        return 'active'
+    try:
+        exp = _parse_iso_utc(inv['expires_at'])
+    except Exception:
+        return 'pending'
+    return 'expired' if exp < _now_utc() else 'pending'
+
+
+def _send_invite_or_flash(db, user_email, raw_token):
+    """Pull SMTP creds from settings and send the invite. Flashes a message
+    on failure rather than raising. Returns True on success."""
+    gmail_user = get_setting(db, 'gmail_user')
+    gmail_pass = get_setting(db, 'gmail_app_password')
+    if not all([gmail_user, gmail_pass]):
+        flash('Cannot send invite — SMTP credentials are not configured in Settings.', 'danger')
+        return False
+    accept_url = url_for('accept_invite', token=raw_token, _external=True)
+    try:
+        send_invite_email(gmail_user, gmail_pass, user_email, accept_url, g.user['email'])
+        return True
+    except Exception as e:
+        flash(f'Failed to send invite email to {user_email}: {e}', 'danger')
+        return False
+
+
+@app.route('/users')
+@admin_required
+def users_list():
+    db = get_db()
+    raw_users = db.execute(
+        'SELECT * FROM users ORDER BY is_admin DESC, email COLLATE NOCASE'
+    ).fetchall()
+    users = []
+    for u in raw_users:
+        users.append({**dict(u), 'status': _user_status(db, u)})
+    db.close()
+    return render_template('users.html', users=users)
+
+
+@app.route('/users/new', methods=['POST'])
+@admin_required
+def user_new():
+    email = request.form.get('email', '').strip()
+    is_admin = 1 if request.form.get('is_admin') else 0
+    if not email or '@' not in email:
+        flash('A valid email is required.', 'danger')
+        return redirect(url_for('users_list'))
+    db = get_db()
+    existing = db.execute('SELECT id FROM users WHERE email = ?', (email,)).fetchone()
+    if existing:
+        db.close()
+        flash(f'A user with email {email} already exists.', 'danger')
+        return redirect(url_for('users_list'))
+    placeholder_hash = generate_password_hash(secrets.token_hex(32))
+    cur = db.execute(
+        'INSERT INTO users (email, password_hash, is_admin) VALUES (?, ?, ?)',
+        (email, placeholder_hash, is_admin))
+    new_user_id = cur.lastrowid
+    raw_token = _create_token(db, new_user_id, purpose='invite')
+    db.commit()
+    sent = _send_invite_or_flash(db, email, raw_token)
+    db.close()
+    if sent:
+        flash(f'Invitation sent to {email}. Expires in {INVITE_TTL_DAYS} days.', 'success')
+    else:
+        flash(f'Account created for {email}, but the invitation email failed to send. '
+              f'Use "Resend invite" once SMTP is configured.', 'warning')
+    return redirect(url_for('users_list'))
+
+
+@app.route('/users/<int:id>/resend-invite', methods=['POST'])
+@admin_required
+def user_resend_invite(id):
+    db = get_db()
+    user = db.execute('SELECT id, email FROM users WHERE id = ?', (id,)).fetchone()
+    if not user:
+        db.close()
+        flash('User not found.', 'danger')
+        return redirect(url_for('users_list'))
+    raw_token = _create_token(db, user['id'], purpose='invite')
+    db.commit()
+    sent = _send_invite_or_flash(db, user['email'], raw_token)
+    db.close()
+    if sent:
+        flash(f'New invite sent to {user["email"]}.', 'success')
+    return redirect(url_for('users_list'))
+
+
+@app.route('/users/<int:id>/impersonate', methods=['POST'])
+@admin_required
+def user_impersonate(id):
+    if session.get('impersonating_user_id'):
+        flash('Already impersonating. Exit first to switch to a different user.', 'danger')
+        return redirect(url_for('users_list'))
+    if id == g.user['id']:
+        flash("Can't impersonate yourself.", 'danger')
+        return redirect(url_for('users_list'))
+    db = get_db()
+    target = db.execute('SELECT id, email FROM users WHERE id = ?', (id,)).fetchone()
+    if not target:
+        db.close()
+        flash('User not found.', 'danger')
+        return redirect(url_for('users_list'))
+    db.execute(
+        'INSERT INTO impersonation_log (admin_id, impersonated_id, started_at) VALUES (?, ?, ?)',
+        (g.user['id'], target['id'], _now_utc().isoformat(timespec='seconds')))
+    db.commit()
+    db.close()
+    session['impersonating_user_id'] = target['id']
+    flash(f'Now acting as {target["email"]}. Admin actions are disabled until you exit.', 'info')
+    return redirect(url_for('dashboard'))
+
+
+@app.route('/impersonate/stop', methods=['POST'])
+@login_required
+def impersonate_stop():
+    imp_id   = session.pop('impersonating_user_id', None)
+    admin_id = g.impersonator['id'] if g.impersonator else None
+    if imp_id and admin_id:
+        db = get_db()
+        db.execute(
+            'UPDATE impersonation_log SET stopped_at = ? '
+            'WHERE admin_id = ? AND impersonated_id = ? AND stopped_at IS NULL',
+            (_now_utc().isoformat(timespec='seconds'), admin_id, imp_id))
+        db.commit()
+        db.close()
+        flash('Exited impersonation.', 'info')
+    return redirect(url_for('users_list'))
+
+
+@app.route('/users/<int:id>/delete', methods=['POST'])
+@admin_required
+def user_delete(id):
+    if id == g.user['id']:
+        flash('You cannot delete your own admin account.', 'danger')
+        return redirect(url_for('users_list'))
+    db = get_db()
+    user = db.execute('SELECT email FROM users WHERE id = ?', (id,)).fetchone()
+    if not user:
+        db.close()
+        flash('User not found.', 'danger')
+        return redirect(url_for('users_list'))
+    db.execute('DELETE FROM users WHERE id = ?', (id,))
+    db.commit()
+    db.close()
+    flash(f'Deleted user {user["email"]} and all their data.', 'success')
+    return redirect(url_for('users_list'))
+
+
+def _consume_valid_token(db, token, purpose):
+    """Return a row with (invite_id, user_id, email) if the token is valid,
+    matches the given purpose, and is not used or expired. Returns None
+    otherwise. Caller is responsible for marking used_at after applying."""
+    if not token:
+        return None
+    token_hash = _hash_invite_token(token)
+    row = db.execute('''
+        SELECT i.id AS invite_id, i.expires_at, i.used_at,
+               u.id AS user_id, u.email
+        FROM invitations i
+        JOIN users u ON u.id = i.user_id
+        WHERE i.token_hash = ? AND i.purpose = ?
+    ''', (token_hash, purpose)).fetchone()
+    if not row or row['used_at']:
+        return None
+    try:
+        exp = _parse_iso_utc(row['expires_at'])
+    except Exception:
+        return None
+    if exp < _now_utc():
+        return None
+    return row
+
+
+@app.route('/accept-invite/<token>', methods=['GET', 'POST'])
+def accept_invite(token):
+    db  = get_db()
+    inv = _consume_valid_token(db, token, purpose='invite')
+    if not inv:
+        db.close()
+        return render_template('accept_invite.html', invalid=True), 410
+
+    if request.method == 'POST':
+        password = request.form.get('password', '')
+        confirm  = request.form.get('confirm_password', '')
+        if len(password) < 8:
+            db.close()
+            return render_template('accept_invite.html', invalid=False, email=inv['email'],
+                                    token=token, error='Password must be at least 8 characters.')
+        if password != confirm:
+            db.close()
+            return render_template('accept_invite.html', invalid=False, email=inv['email'],
+                                    token=token, error='Passwords do not match.')
+        db.execute('UPDATE users SET password_hash = ? WHERE id = ?',
+                   (generate_password_hash(password), inv['user_id']))
+        db.execute('UPDATE invitations SET used_at = ? WHERE id = ?',
+                   (_now_utc().isoformat(timespec='seconds'), inv['invite_id']))
+        db.commit()
+        db.close()
+        session.clear()
+        session['user_id'] = inv['user_id']
+        flash('Account set up. Welcome!', 'success')
+        return redirect(url_for('dashboard'))
+
+    db.close()
+    return render_template('accept_invite.html', invalid=False, email=inv['email'], token=token)
+
+
+@app.route('/forgot-password', methods=['GET', 'POST'])
+def forgot_password():
+    if g.get('user'):
+        return redirect(url_for('dashboard'))
+    if request.method == 'POST':
+        email = request.form.get('email', '').strip()
+        # Same flash regardless of whether the email exists, to prevent
+        # account enumeration.
+        generic_msg = ('If an account with that email exists, a reset link has been sent. '
+                       f'It expires in {RESET_TTL_HOURS} hours.')
+        if not email:
+            flash(generic_msg, 'info')
+            return redirect(url_for('login'))
+        db   = get_db()
+        user = db.execute('SELECT id, email FROM users WHERE email = ?', (email,)).fetchone()
+        if user:
+            raw_token  = _create_token(db, user['id'], purpose='reset')
+            db.commit()
+            gmail_user = get_setting(db, 'gmail_user')
+            gmail_pass = get_setting(db, 'gmail_app_password')
+            if gmail_user and gmail_pass:
+                reset_url = url_for('reset_password', token=raw_token, _external=True)
+                try:
+                    send_reset_email(gmail_user, gmail_pass, user['email'], reset_url)
+                except Exception as e:
+                    app.logger.error(f'Failed to send reset email to {user["email"]}: {e}')
+        db.close()
+        flash(generic_msg, 'info')
+        return redirect(url_for('login'))
+    return render_template('forgot_password.html')
+
+
+@app.route('/reset-password/<token>', methods=['GET', 'POST'])
+def reset_password(token):
+    db  = get_db()
+    inv = _consume_valid_token(db, token, purpose='reset')
+    if not inv:
+        db.close()
+        return render_template('reset_password.html', invalid=True), 410
+
+    if request.method == 'POST':
+        password = request.form.get('password', '')
+        confirm  = request.form.get('confirm_password', '')
+        if len(password) < 8:
+            db.close()
+            return render_template('reset_password.html', invalid=False, email=inv['email'],
+                                    token=token, error='Password must be at least 8 characters.')
+        if password != confirm:
+            db.close()
+            return render_template('reset_password.html', invalid=False, email=inv['email'],
+                                    token=token, error='Passwords do not match.')
+        db.execute('UPDATE users SET password_hash = ? WHERE id = ?',
+                   (generate_password_hash(password), inv['user_id']))
+        db.execute('UPDATE invitations SET used_at = ? WHERE id = ?',
+                   (_now_utc().isoformat(timespec='seconds'), inv['invite_id']))
+        db.commit()
+        db.close()
+        session.clear()
+        session['user_id'] = inv['user_id']
+        flash('Password reset. You are now signed in.', 'success')
+        return redirect(url_for('dashboard'))
+
+    db.close()
+    return render_template('reset_password.html', invalid=False, email=inv['email'], token=token)
+
+
 # ── Dashboard ──────────────────────────────────────────────────────────────────
 
 @app.route('/')
 @login_required
 def dashboard():
     db = get_db()
-    cards = db.execute('SELECT * FROM cards WHERE active = 1 ORDER BY name').fetchall()
+    uid = g.user['id']
+    cards = db.execute('''
+        SELECT c.* FROM cards c
+        JOIN user_cards uc ON uc.card_id = c.id
+        WHERE uc.user_id = ? AND uc.active = 1 AND c.active = 1
+        ORDER BY c.name
+    ''', (uid,)).fetchall()
 
     dashboard_cards = []
     total_benefits = 0
     total_used = 0
 
     for card in cards:
-        raw_benefits = db.execute(
-            'SELECT * FROM benefits WHERE card_id = ? AND active = 1 ORDER BY name',
-            (card['id'],)
-        ).fetchall()
-        enriched = [enrich_benefit(db, b) for b in raw_benefits]
+        raw_benefits = db.execute('''
+            SELECT b.* FROM benefits b
+            LEFT JOIN user_benefits ub ON ub.benefit_id = b.id AND ub.user_id = ?
+            WHERE b.card_id = ? AND b.active = 1 AND COALESCE(ub.active, 1) = 1
+            ORDER BY b.name
+        ''', (uid, card['id'])).fetchall()
+        enriched = [enrich_benefit(db, b, uid) for b in raw_benefits]
         enriched.sort(key=lambda b: (1 if b['fully_used'] else 0, b['days_left']))
         total_benefits += len(enriched)
         total_used += sum(1 for b in enriched if b['fully_used'])
 
-        inactive = db.execute(
-            'SELECT * FROM benefits WHERE card_id = ? AND active = 0 ORDER BY name',
-            (card['id'],)
-        ).fetchall()
+        # "Inactive" panel shows both catalog-inactive AND user-hidden benefits,
+        # so the user can re-enable them from the dashboard if desired.
+        inactive = db.execute('''
+            SELECT b.* FROM benefits b
+            LEFT JOIN user_benefits ub ON ub.benefit_id = b.id AND ub.user_id = ?
+            WHERE b.card_id = ? AND (b.active = 0 OR COALESCE(ub.active, 1) = 0)
+            ORDER BY b.name
+        ''', (uid, card['id'])).fetchall()
 
-        captured, max_possible = compute_card_roi(db, enriched)
+        captured, max_possible = compute_card_roi(db, enriched, uid)
         annual_fee = card['annual_fee'] or 0
         roi = {
             'captured':      captured,
@@ -330,6 +919,75 @@ def dashboard():
 
 # ── Cards ──────────────────────────────────────────────────────────────────────
 
+@app.route('/card-templates')
+@login_required
+def card_templates():
+    db = get_db()
+    rows = db.execute('''
+        SELECT c.id, c.name, c.annual_fee, c.active,
+               COUNT(b.id) AS benefit_count,
+               uc.active   AS user_active
+        FROM cards c
+        LEFT JOIN benefits b   ON b.card_id  = c.id AND b.active = 1
+        LEFT JOIN user_cards uc ON uc.card_id = c.id AND uc.user_id = ?
+        WHERE c.published = 1
+        GROUP BY c.id
+        ORDER BY c.name
+    ''', (g.user['id'],)).fetchall()
+    db.close()
+    return render_template('card_templates.html', cards=rows)
+
+
+@app.route('/card-templates/<int:card_id>/add', methods=['POST'])
+@login_required
+def card_templates_add(card_id):
+    db   = get_db()
+    uid  = g.user['id']
+    card = db.execute(
+        'SELECT id, name FROM cards WHERE id = ? AND published = 1', (card_id,)
+    ).fetchone()
+    if not card:
+        db.close()
+        flash('That card is not available in the templates.', 'danger')
+        return redirect(url_for('card_templates'))
+    existing = db.execute(
+        'SELECT id, active FROM user_cards WHERE user_id = ? AND card_id = ?',
+        (uid, card_id)
+    ).fetchone()
+    if existing:
+        db.execute('UPDATE user_cards SET active = 1 WHERE id = ?', (existing['id'],))
+    else:
+        db.execute(
+            'INSERT INTO user_cards (user_id, card_id, active) VALUES (?, ?, 1)',
+            (uid, card_id))
+    db.commit()
+    db.close()
+    flash(f'"{card["name"]}" added to your dashboard.', 'success')
+    return redirect(url_for('dashboard'))
+
+
+@app.route('/cards/<int:id>/remove', methods=['POST'])
+@login_required
+def card_remove(id):
+    """Soft-remove the card from the current user's dashboard. Redemption
+    history stays in the db so re-adding restores everything."""
+    db = get_db()
+    row = db.execute(
+        'SELECT uc.id, c.name FROM user_cards uc JOIN cards c ON c.id = uc.card_id '
+        'WHERE uc.user_id = ? AND uc.card_id = ?',
+        (g.user['id'], id)
+    ).fetchone()
+    if not row:
+        db.close()
+        flash('Card not found on your dashboard.', 'danger')
+        return redirect(url_for('cards_list'))
+    db.execute('UPDATE user_cards SET active = 0 WHERE id = ?', (row['id'],))
+    db.commit()
+    db.close()
+    flash(f'"{row["name"]}" removed from your dashboard. Re-add anytime from Card Templates.', 'success')
+    return redirect(url_for('cards_list'))
+
+
 @app.route('/cards')
 @login_required
 def cards_list():
@@ -337,21 +995,22 @@ def cards_list():
     cards = db.execute('''
         SELECT c.*, COUNT(b.id) AS benefit_count
         FROM cards c
+        JOIN user_cards uc ON uc.card_id = c.id AND uc.user_id = ?
         LEFT JOIN benefits b ON b.card_id = c.id AND b.active = 1
         GROUP BY c.id
         ORDER BY c.active DESC, c.name
-    ''').fetchall()
+    ''', (g.user['id'],)).fetchall()
     db.close()
     return render_template('cards/list.html', cards=cards)
 
 
 @app.route('/cards/new', methods=['GET', 'POST'])
-@login_required
+@admin_required
 def card_new():
     if request.method == 'POST':
         name        = request.form.get('name', '').strip()
-        owner_email = request.form.get('owner_email', '').strip() or None
         annual_fee  = request.form.get('annual_fee', '').strip() or None
+        published   = 1 if request.form.get('published') else 0
         if annual_fee:
             try:
                 annual_fee = float(annual_fee)
@@ -362,9 +1021,12 @@ def card_new():
             return render_template('cards/form.html', form=request.form)
         db = get_db()
         cur = db.execute(
-            'INSERT INTO cards (name, annual_fee, owner_email) VALUES (?, ?, ?)',
-            (name, annual_fee, owner_email))
+            'INSERT INTO cards (name, annual_fee, published) VALUES (?, ?, ?)',
+            (name, annual_fee, published))
         cid = cur.lastrowid
+        db.execute(
+            'INSERT INTO user_cards (user_id, card_id, active) VALUES (?, ?, 1)',
+            (g.user['id'], cid))
         db.commit()
         db.close()
         flash(f'Card "{name}" added.', 'success')
@@ -376,16 +1038,24 @@ def card_new():
 @login_required
 def card_detail(id):
     db   = get_db()
-    card = db.execute('SELECT * FROM cards WHERE id = ?', (id,)).fetchone()
+    card = db.execute('''
+        SELECT c.* FROM cards c
+        JOIN user_cards uc ON uc.card_id = c.id
+        WHERE c.id = ? AND uc.user_id = ?
+    ''', (id, g.user['id'])).fetchone()
     if not card:
         db.close()
         flash('Card not found.', 'danger')
         return redirect(url_for('cards_list'))
 
     if request.method == 'POST':
+        if not g.user['is_admin']:
+            db.close()
+            flash('Admin access required.', 'danger')
+            return redirect(url_for('card_detail', id=id))
         name        = request.form.get('name', '').strip()
         active      = 1 if request.form.get('active') else 0
-        owner_email = request.form.get('owner_email', '').strip() or None
+        published   = 1 if request.form.get('published') else 0
         annual_fee  = request.form.get('annual_fee', '').strip() or None
         if annual_fee:
             try:
@@ -396,24 +1066,31 @@ def card_detail(id):
             flash('Card name is required.', 'danger')
         else:
             db.execute(
-                'UPDATE cards SET name=?, active=?, annual_fee=?, owner_email=? WHERE id=?',
-                (name, active, annual_fee, owner_email, id))
+                'UPDATE cards SET name=?, active=?, annual_fee=?, published=? WHERE id=?',
+                (name, active, annual_fee, published, id))
             db.commit()
             flash('Card updated.', 'success')
         db.close()
         return redirect(url_for('card_detail', id=id))
 
-    raw_benefits = db.execute(
-        'SELECT * FROM benefits WHERE card_id = ? ORDER BY active DESC, name',
-        (id,)
-    ).fetchall()
-    benefits = [enrich_benefit(db, b) for b in raw_benefits]
+    raw_benefits = db.execute('''
+        SELECT b.*, COALESCE(ub.active, 1) AS user_active
+        FROM benefits b
+        LEFT JOIN user_benefits ub ON ub.benefit_id = b.id AND ub.user_id = ?
+        WHERE b.card_id = ?
+        ORDER BY b.active DESC, b.name
+    ''', (g.user['id'], id)).fetchall()
+    benefits = []
+    for b in raw_benefits:
+        eb = enrich_benefit(db, b, g.user['id'])
+        eb['user_active'] = b['user_active']
+        benefits.append(eb)
     db.close()
     return render_template('cards/detail.html', card=card, benefits=benefits)
 
 
 @app.route('/cards/<int:id>/delete', methods=['POST'])
-@login_required
+@admin_required
 def card_delete(id):
     db  = get_db()
     row = db.execute('SELECT name FROM cards WHERE id = ?', (id,)).fetchone()
@@ -428,7 +1105,7 @@ def card_delete(id):
 # ── Benefits ───────────────────────────────────────────────────────────────────
 
 @app.route('/cards/<int:card_id>/benefits/new', methods=['GET', 'POST'])
-@login_required
+@admin_required
 def benefit_new(card_id):
     db   = get_db()
     card = db.execute('SELECT * FROM cards WHERE id = ?', (card_id,)).fetchone()
@@ -465,11 +1142,13 @@ def benefit_new(card_id):
             'VALUES (?, ?, ?, ?, ?, ?)',
             (card_id, name, description, credit_amount, period_type, is_subscription))
         bid = cur.lastrowid
+        uid = g.user['id']
 
         for d in reminder_days:
             try:
-                db.execute('INSERT OR IGNORE INTO reminders (benefit_id, days_before) VALUES (?, ?)',
-                           (bid, int(d)))
+                db.execute(
+                    'INSERT OR IGNORE INTO reminders (user_id, benefit_id, days_before) VALUES (?, ?, ?)',
+                    (uid, bid, int(d)))
             except ValueError:
                 pass
 
@@ -477,8 +1156,9 @@ def benefit_new(card_id):
         custom_day = request.form.get('custom_reminder_day', '').strip()
         if custom_day:
             try:
-                db.execute('INSERT OR IGNORE INTO reminders (benefit_id, days_before) VALUES (?, ?)',
-                           (bid, int(custom_day)))
+                db.execute(
+                    'INSERT OR IGNORE INTO reminders (user_id, benefit_id, days_before) VALUES (?, ?, ?)',
+                    (uid, bid, int(custom_day)))
             except ValueError:
                 pass
 
@@ -496,75 +1176,111 @@ def benefit_new(card_id):
 @login_required
 def benefit_edit(id):
     db  = get_db()
-    b   = db.execute('SELECT * FROM benefits WHERE id = ?', (id,)).fetchone()
+    uid = g.user['id']
+    # Only let the user touch a benefit on a card they actually have
+    b = db.execute('''
+        SELECT b.* FROM benefits b
+        JOIN user_cards uc ON uc.card_id = b.card_id
+        WHERE b.id = ? AND uc.user_id = ?
+    ''', (id, uid)).fetchone()
     if not b:
         db.close()
         flash('Benefit not found.', 'danger')
         return redirect(url_for('dashboard'))
     card = db.execute('SELECT * FROM cards WHERE id = ?', (b['card_id'],)).fetchone()
+    is_admin = bool(g.user['is_admin'])
+
+    def _save_reminders(reminder_days, custom_day):
+        db.execute('DELETE FROM reminders WHERE user_id = ? AND benefit_id = ?', (uid, id))
+        for d in reminder_days:
+            try:
+                db.execute(
+                    'INSERT OR IGNORE INTO reminders (user_id, benefit_id, days_before) VALUES (?, ?, ?)',
+                    (uid, id, int(d)))
+            except ValueError:
+                pass
+        if custom_day:
+            try:
+                db.execute(
+                    'INSERT OR IGNORE INTO reminders (user_id, benefit_id, days_before) VALUES (?, ?, ?)',
+                    (uid, id, int(custom_day)))
+            except ValueError:
+                pass
 
     if request.method == 'POST':
-        name               = request.form.get('name', '').strip()
-        description        = request.form.get('description', '').strip() or None
-        credit_amount      = request.form.get('credit_amount', '').strip() or None
-        period_type        = request.form.get('period_type', 'monthly')
-        is_subscription    = 1 if request.form.get('is_subscription') else 0
-        active             = 1 if request.form.get('active') else 0
-        reminder_days      = request.form.getlist('reminder_days')
+        reminder_days = request.form.getlist('reminder_days')
+        custom_day    = request.form.get('custom_reminder_day', '').strip()
 
-        if not name:
-            flash('Name is required.', 'danger')
-            db.close()
-            return render_template('benefits/form.html', card=card, form=request.form,
-                                   benefit=b, period_labels=PERIOD_LABELS)
+        if is_admin:
+            name            = request.form.get('name', '').strip()
+            description     = request.form.get('description', '').strip() or None
+            credit_amount   = request.form.get('credit_amount', '').strip() or None
+            period_type     = request.form.get('period_type', 'monthly')
+            is_subscription = 1 if request.form.get('is_subscription') else 0
+            active          = 1 if request.form.get('active') else 0
 
-        if credit_amount:
-            try:
-                credit_amount = float(credit_amount)
-            except ValueError:
-                flash('Credit amount must be a number.', 'danger')
+            if not name:
+                flash('Name is required.', 'danger')
                 db.close()
                 return render_template('benefits/form.html', card=card, form=request.form,
                                        benefit=b, period_labels=PERIOD_LABELS)
 
-        db.execute(
-            'UPDATE benefits SET name=?, description=?, credit_amount=?, period_type=?, is_subscription=?, '
-            'active=? WHERE id=?',
-            (name, description, credit_amount, period_type, is_subscription, active, id))
+            if credit_amount:
+                try:
+                    credit_amount = float(credit_amount)
+                except ValueError:
+                    flash('Credit amount must be a number.', 'danger')
+                    db.close()
+                    return render_template('benefits/form.html', card=card, form=request.form,
+                                           benefit=b, period_labels=PERIOD_LABELS)
 
-        db.execute('DELETE FROM reminders WHERE benefit_id = ?', (id,))
-        for d in reminder_days:
-            try:
-                db.execute('INSERT OR IGNORE INTO reminders (benefit_id, days_before) VALUES (?, ?)',
-                           (id, int(d)))
-            except ValueError:
-                pass
+            db.execute(
+                'UPDATE benefits SET name=?, description=?, credit_amount=?, period_type=?, is_subscription=?, '
+                'active=? WHERE id=?',
+                (name, description, credit_amount, period_type, is_subscription, active, id))
+        else:
+            # Non-admin: only their own per-user hide/show is editable.
+            user_active = 1 if request.form.get('active') else 0
+            existing = db.execute(
+                'SELECT id FROM user_benefits WHERE user_id = ? AND benefit_id = ?',
+                (uid, id)).fetchone()
+            if existing:
+                db.execute('UPDATE user_benefits SET active = ? WHERE id = ?',
+                           (user_active, existing['id']))
+            else:
+                db.execute(
+                    'INSERT INTO user_benefits (user_id, benefit_id, active) VALUES (?, ?, ?)',
+                    (uid, id, user_active))
 
-        custom_day = request.form.get('custom_reminder_day', '').strip()
-        if custom_day:
-            try:
-                db.execute('INSERT OR IGNORE INTO reminders (benefit_id, days_before) VALUES (?, ?)',
-                           (id, int(custom_day)))
-            except ValueError:
-                pass
-
+        _save_reminders(reminder_days, custom_day)
         db.commit()
         card_id = b['card_id']
         db.close()
-        flash(f'Benefit "{name}" updated.', 'success')
+        flash(f'Benefit "{b["name"]}" updated.', 'success')
         next_url = request.form.get('_next') or url_for('card_detail', id=card_id)
         return redirect(next_url)
 
-    existing_days = [r['days_before'] for r in
-                     db.execute('SELECT days_before FROM reminders WHERE benefit_id = ?', (id,)).fetchall()]
+    existing_days = [r['days_before'] for r in db.execute(
+        'SELECT days_before FROM reminders WHERE user_id = ? AND benefit_id = ?',
+        (uid, id)
+    ).fetchall()]
+    if is_admin:
+        form_data = dict(b)
+    else:
+        # Pre-fill the "active" checkbox from the per-user override (default visible)
+        ub = db.execute(
+            'SELECT active FROM user_benefits WHERE user_id = ? AND benefit_id = ?',
+            (uid, id)).fetchone()
+        form_data = dict(b)
+        form_data['active'] = ub['active'] if ub else 1
     db.close()
-    return render_template('benefits/form.html', card=card, form=dict(b),
+    return render_template('benefits/form.html', card=card, form=form_data,
                            benefit=b, existing_reminder_days=existing_days,
                            period_labels=PERIOD_LABELS)
 
 
 @app.route('/benefits/<int:id>/delete', methods=['POST'])
-@login_required
+@admin_required
 def benefit_delete(id):
     db  = get_db()
     row = db.execute('SELECT card_id, name FROM benefits WHERE id = ?', (id,)).fetchone()
@@ -584,8 +1300,13 @@ def benefit_delete(id):
 @app.route('/benefits/<int:id>/redeem', methods=['POST'])
 @login_required
 def benefit_redeem(id):
-    db = get_db()
-    b  = db.execute('SELECT * FROM benefits WHERE id = ?', (id,)).fetchone()
+    db  = get_db()
+    uid = g.user['id']
+    b   = db.execute('''
+        SELECT b.* FROM benefits b
+        JOIN user_cards uc ON uc.card_id = b.card_id
+        WHERE b.id = ? AND uc.user_id = ?
+    ''', (id, uid)).fetchone()
     if not b:
         db.close()
         return jsonify({'error': 'Not found'}), 404
@@ -625,17 +1346,17 @@ def benefit_redeem(id):
             p_start, p_end = get_current_period(b['period_type'], for_date=cursor)
             ps_str = str(p_start)
             existing = db.execute(
-                'SELECT id FROM redemptions WHERE benefit_id=? AND period_start=?',
-                (id, ps_str)
+                'SELECT id FROM redemptions WHERE user_id=? AND benefit_id=? AND period_start=?',
+                (uid, id, ps_str)
             ).fetchone()
             if existing:
                 db.execute('UPDATE redemptions SET amount = ? WHERE id = ?',
                            (row_amount, existing['id']))
             else:
                 db.execute(
-                    'INSERT INTO redemptions (benefit_id, period_start, amount, notes) '
-                    'VALUES (?, ?, ?, ?)',
-                    (id, ps_str, row_amount, notes or 'subscription'))
+                    'INSERT INTO redemptions (user_id, benefit_id, period_start, amount, notes) '
+                    'VALUES (?, ?, ?, ?, ?)',
+                    (uid, id, ps_str, row_amount, notes or 'subscription'))
             count += 1
             cursor = p_end + timedelta(days=1)
         db.commit()
@@ -661,8 +1382,8 @@ def benefit_redeem(id):
             amount = None
 
     db.execute(
-        'INSERT INTO redemptions (benefit_id, period_start, amount, notes) VALUES (?, ?, ?, ?)',
-        (id, str(period_start), amount, notes))
+        'INSERT INTO redemptions (user_id, benefit_id, period_start, amount, notes) VALUES (?, ?, ?, ?, ?)',
+        (uid, id, str(period_start), amount, notes))
     db.commit()
     db.close()
     flash('Redemption recorded.', 'success')
@@ -674,7 +1395,10 @@ def benefit_redeem(id):
 def redemption_edit(id):
     db  = get_db()
     row = db.execute(
-        'SELECT r.*, b.period_type FROM redemptions r JOIN benefits b ON b.id = r.benefit_id WHERE r.id = ?', (id,)
+        'SELECT r.*, b.period_type FROM redemptions r '
+        'JOIN benefits b ON b.id = r.benefit_id '
+        'WHERE r.id = ? AND r.user_id = ?',
+        (id, g.user['id'])
     ).fetchone()
     if not row:
         db.close()
@@ -702,28 +1426,34 @@ def redemption_edit(id):
 @login_required
 def redemption_delete(id):
     db  = get_db()
-    row = db.execute('SELECT benefit_id FROM redemptions WHERE id = ?', (id,)).fetchone()
+    row = db.execute(
+        'SELECT benefit_id FROM redemptions WHERE id = ? AND user_id = ?',
+        (id, g.user['id'])
+    ).fetchone()
     if row:
         db.execute('DELETE FROM redemptions WHERE id = ?', (id,))
         db.commit()
         flash('Redemption removed.', 'success')
-        bid = row['benefit_id']
-        db.close()
-        return redirect(request.referrer or url_for('dashboard'))
     db.close()
-    return redirect(url_for('dashboard'))
+    return redirect(request.referrer or url_for('dashboard'))
 
 
 @app.route('/benefits/<int:id>/redemptions')
 @login_required
 def benefit_redemptions(id):
-    db = get_db()
-    b  = db.execute('SELECT b.*, c.name AS card_name FROM benefits b JOIN cards c ON c.id = b.card_id WHERE b.id = ?', (id,)).fetchone()
+    db  = get_db()
+    uid = g.user['id']
+    b   = db.execute('''
+        SELECT b.*, c.name AS card_name FROM benefits b
+        JOIN cards c ON c.id = b.card_id
+        JOIN user_cards uc ON uc.card_id = c.id
+        WHERE b.id = ? AND uc.user_id = ?
+    ''', (id, uid)).fetchone()
     if not b:
         db.close()
         flash('Benefit not found.', 'danger')
         return redirect(url_for('dashboard'))
-    enriched = enrich_benefit(db, b)
+    enriched = enrich_benefit(db, b, uid)
 
     # Build last-year period history
     _n_map = {'monthly': 12, 'quarterly': 4, 'semi-annual': 2, 'annual': 1}
@@ -734,8 +1464,8 @@ def benefit_redemptions(id):
         p_start, p_end = get_current_period(enriched['period_type'], for_date=check_date)
         pr = db.execute(
             'SELECT COALESCE(SUM(amount),0) AS total, COUNT(*) AS cnt '
-            'FROM redemptions WHERE benefit_id=? AND period_start=?',
-            (enriched['id'], str(p_start))
+            'FROM redemptions WHERE user_id=? AND benefit_id=? AND period_start=?',
+            (uid, enriched['id'], str(p_start))
         ).fetchone()
         amount_used = float(pr['total'])
         if enriched['credit_amount']:
@@ -753,7 +1483,9 @@ def benefit_redemptions(id):
     # Group all redemptions by period_start
     from collections import defaultdict
     all_redemptions = db.execute(
-        'SELECT * FROM redemptions WHERE benefit_id=? ORDER BY period_start DESC, redeemed_at DESC', (id,)
+        'SELECT * FROM redemptions WHERE user_id=? AND benefit_id=? '
+        'ORDER BY period_start DESC, redeemed_at DESC',
+        (uid, id)
     ).fetchall()
     redemptions_by_period = defaultdict(list)
     for r in all_redemptions:
@@ -762,16 +1494,17 @@ def benefit_redemptions(id):
     # Older periods (beyond last year) that have redemptions
     oldest_in_range = str(period_history[0]['period_start']) if period_history else None
     has_older = bool(oldest_in_range and db.execute(
-        'SELECT 1 FROM redemptions WHERE benefit_id=? AND period_start<? LIMIT 1',
-        (id, oldest_in_range)
+        'SELECT 1 FROM redemptions WHERE user_id=? AND benefit_id=? AND period_start<? LIMIT 1',
+        (uid, id, oldest_in_range)
     ).fetchone())
 
     show_all = request.args.get('all') == '1'
     older_periods = []
     if show_all and oldest_in_range:
         old_starts = db.execute(
-            'SELECT DISTINCT period_start FROM redemptions WHERE benefit_id=? AND period_start<? ORDER BY period_start DESC',
-            (id, oldest_in_range)
+            'SELECT DISTINCT period_start FROM redemptions '
+            'WHERE user_id=? AND benefit_id=? AND period_start<? ORDER BY period_start DESC',
+            (uid, id, oldest_in_range)
         ).fetchall()
         for row in old_starts:
             ps_str  = row['period_start']
@@ -798,8 +1531,51 @@ def benefit_redemptions(id):
 
 # ── Settings ───────────────────────────────────────────────────────────────────
 
-@app.route('/settings', methods=['GET', 'POST'])
+@app.route('/preferences', methods=['GET', 'POST'])
 @login_required
+def preferences():
+    db = get_db()
+    if request.method == 'POST':
+        notification_email = request.form.get('notification_email', '').strip() or None
+        reminders_enabled  = 1 if request.form.get('reminders_enabled') else 0
+        summary_enabled    = 1 if request.form.get('summary_enabled') else 0
+        db.execute(
+            'UPDATE users SET notification_email = ?, reminders_enabled = ?, summary_enabled = ? WHERE id = ?',
+            (notification_email, reminders_enabled, summary_enabled, g.user['id']))
+        db.commit()
+        db.close()
+        flash('Preferences saved.', 'success')
+        return redirect(url_for('preferences'))
+    db.close()
+    return render_template('preferences.html')
+
+
+@app.route('/preferences/password', methods=['POST'])
+@login_required
+def change_password():
+    current = request.form.get('current_password', '')
+    new     = request.form.get('new_password', '')
+    confirm = request.form.get('confirm_password', '')
+    if not check_password_hash(g.user['password_hash'], current):
+        flash('Current password is incorrect.', 'danger')
+        return redirect(url_for('preferences'))
+    if len(new) < 8:
+        flash('New password must be at least 8 characters.', 'danger')
+        return redirect(url_for('preferences'))
+    if new != confirm:
+        flash('New passwords do not match.', 'danger')
+        return redirect(url_for('preferences'))
+    db = get_db()
+    db.execute('UPDATE users SET password_hash = ? WHERE id = ?',
+               (generate_password_hash(new), g.user['id']))
+    db.commit()
+    db.close()
+    flash('Password updated.', 'success')
+    return redirect(url_for('preferences'))
+
+
+@app.route('/settings', methods=['GET', 'POST'])
+@admin_required
 def settings():
     db = get_db()
     if request.method == 'POST':
@@ -836,160 +1612,145 @@ def settings():
 @app.route('/email/summary', methods=['POST'])
 @login_required
 def send_summary():
-    db = get_db()
-    gmail_user     = get_setting(db, 'gmail_user')
-    gmail_pass     = get_setting(db, 'gmail_app_password')
-    test_recipient = request.form.get('test_recipient', '').strip() or None
-
-    if not all([gmail_user, gmail_pass]):
-        flash('Gmail credentials are not configured. Fill in Settings first.', 'danger')
-        db.close()
-        return redirect(url_for('settings'))
-
-    cards = db.execute('SELECT * FROM cards WHERE active = 1 ORDER BY name').fetchall()
-
-    def _pending_for_card(card):
-        raw = db.execute(
-            'SELECT * FROM benefits WHERE card_id = ? AND active = 1', (card['id'],)
-        ).fetchall()
-        enriched = [enrich_benefit(db, b) for b in raw]
-        pending = [b for b in enriched if not b['fully_used'] and not b['is_subscription']]
-        pending.sort(key=lambda b: b['days_left'])
-        return pending
-
-    if test_recipient:
-        # Combine all cards into one email to the override address
-        cards_data = []
-        for card in cards:
-            pending = _pending_for_card(card)
-            if pending:
-                cards_data.append({'card_name': card['name'], 'benefits': pending})
-        db.close()
-        if not cards_data:
-            flash('Nothing to send — all benefits are fully used or set to auto.', 'info')
-            return redirect(url_for('settings'))
-        try:
-            send_summary_email(gmail_user, gmail_pass, test_recipient, cards_data)
-            total = sum(len(c['benefits']) for c in cards_data)
-            flash(f'Test summary sent to {test_recipient} — {total} benefit(s) across {len(cards_data)} card(s).', 'success')
-        except Exception as e:
-            flash(f'Failed to send email: {e}', 'danger')
-    else:
-        # Route each card to its owner email; skip cards with no address set
-        by_recipient = {}
-        skipped = 0
-        for card in cards:
-            if not card['owner_email']:
-                skipped += 1
-                continue
-            pending = _pending_for_card(card)
-            if pending:
-                by_recipient.setdefault(card['owner_email'], []).append(
-                    {'card_name': card['name'], 'benefits': pending}
-                )
-        db.close()
-        if not by_recipient:
-            msg = 'Nothing to send — all benefits are handled.'
-            if skipped:
-                msg += f' ({skipped} card(s) have no owner email set.)'
-            flash(msg, 'info')
-            return redirect(url_for('settings'))
-        errors = []
-        sent_msgs = []
-        for to, cards_data in by_recipient.items():
-            try:
-                send_summary_email(gmail_user, gmail_pass, to, cards_data)
-                total = sum(len(c['benefits']) for c in cards_data)
-                sent_msgs.append(f'{to} ({total} benefit(s))')
-            except Exception as e:
-                errors.append(f'{to}: {e}')
-        if sent_msgs:
-            suffix = f' — {skipped} card(s) skipped (no owner email).' if skipped else '.'
-            flash(f'Summary sent — {"; ".join(sent_msgs)}{suffix}', 'success')
-        for err in errors:
-            flash(f'Failed to send to {err}', 'danger')
-
-    return redirect(url_for('settings'))
-
-
-# ── Reminder logic ─────────────────────────────────────────────────────────────
-
-def _run_reminder_check(force=False):
-    """
-    Check all active benefits. For each, if there is remaining credit
-    and today is N days before period_end (matching a configured reminder),
-    send an email. Returns count of benefits included in the email.
-    force=True bypasses the "already sent" dedup check.
-    """
+    """Send a summary email of the current user's cards. Default recipient
+    is the user's notification_email (falling back to their login email).
+    Admin can override with a test_recipient form field for testing."""
     db = get_db()
     gmail_user = get_setting(db, 'gmail_user')
     gmail_pass = get_setting(db, 'gmail_app_password')
 
     if not all([gmail_user, gmail_pass]):
         db.close()
-        return 0
+        flash('Gmail credentials are not configured. Ask the administrator to set them up.', 'danger')
+        return redirect(url_for('preferences'))
 
-    today = date.today()
-    benefits_due = []
+    uid       = g.user['id']
+    recipient = (g.user['notification_email'] or g.user['email'])
+    # Admin can override the destination for testing
+    test_recipient = request.form.get('test_recipient', '').strip() or None
+    if test_recipient and g.user['is_admin']:
+        recipient = test_recipient
 
-    raw = db.execute('''
-        SELECT b.*, c.name AS card_name, c.owner_email
-        FROM benefits b
-        JOIN cards c ON c.id = b.card_id
-        WHERE b.active = 1 AND c.active = 1
-    ''').fetchall()
+    cards = db.execute('''
+        SELECT c.* FROM cards c
+        JOIN user_cards uc ON uc.card_id = c.id
+        WHERE uc.user_id = ? AND uc.active = 1 AND c.active = 1
+        ORDER BY c.name
+    ''', (uid,)).fetchall()
 
-    for row in raw:
-        b = enrich_benefit(db, row)
-        if b['fully_used']:
-            continue
-
-        period_start_str = str(b['period_start'])
-        dl = b['days_left']
-
-        for days_before in b['reminder_days']:
-            if dl == days_before or (force and dl <= days_before):
-                already_sent = db.execute(
-                    'SELECT 1 FROM sent_reminders WHERE benefit_id=? AND period_start=? AND days_before=?',
-                    (b['id'], period_start_str, days_before)
-                ).fetchone()
-
-                if not already_sent or force:
-                    card_recipient = row['owner_email']
-                    if not card_recipient:
-                        break  # no address configured for this card — skip
-                    benefits_due.append({
-                        'to':            card_recipient,
-                        'card_name':     row['card_name'],
-                        'benefit_name':  b['name'],
-                        'credit_amount': b['credit_amount'],
-                        'amount_used':   b['amount_used'],
-                        'period_end':    b['period_end'].strftime('%b %d, %Y'),
-                        'days_left':     dl,
-                    })
-                    if not already_sent:
-                        db.execute(
-                            'INSERT OR IGNORE INTO sent_reminders (benefit_id, period_start, days_before) VALUES (?, ?, ?)',
-                            (b['id'], period_start_str, days_before))
-                    break  # only include a benefit once per email
-
-    if benefits_due:
-        from collections import defaultdict
-        by_recipient = defaultdict(list)
-        for bd in benefits_due:
-            to = bd.pop('to')
-            by_recipient[to].append(bd)
-        try:
-            for to, items in by_recipient.items():
-                send_reminder_email(gmail_user, gmail_pass, to, items)
-            db.commit()
-        except Exception as e:
-            app.logger.error(f'Failed to send reminder email: {e}')
-            db.rollback()
-            benefits_due = []
+    cards_data = []
+    for card in cards:
+        raw = db.execute('''
+            SELECT b.* FROM benefits b
+            LEFT JOIN user_benefits ub ON ub.benefit_id = b.id AND ub.user_id = ?
+            WHERE b.card_id = ? AND b.active = 1 AND COALESCE(ub.active, 1) = 1
+        ''', (uid, card['id'])).fetchall()
+        enriched = [enrich_benefit(db, b, uid) for b in raw]
+        pending  = [b for b in enriched if not b['fully_used'] and not b['is_subscription']]
+        pending.sort(key=lambda b: b['days_left'])
+        if pending:
+            cards_data.append({'card_name': card['name'], 'benefits': pending})
 
     db.close()
-    return len(benefits_due)
+
+    back = url_for('settings') if test_recipient and g.user['is_admin'] else url_for('preferences')
+
+    if not cards_data:
+        flash('Nothing to send — all benefits are fully used or handled by subscription.', 'info')
+        return redirect(back)
+
+    try:
+        send_summary_email(gmail_user, gmail_pass, recipient, cards_data)
+        total = sum(len(c['benefits']) for c in cards_data)
+        label = 'Test summary' if (test_recipient and g.user['is_admin']) else 'Summary'
+        flash(f'{label} sent to {recipient} — {total} benefit(s) across {len(cards_data)} card(s).', 'success')
+    except Exception as e:
+        flash(f'Failed to send email: {e}', 'danger')
+
+    return redirect(back)
+
+
+# ── Reminder logic ─────────────────────────────────────────────────────────────
+
+def _run_reminder_check(force=False):
+    """
+    Iterate over every user with reminders_enabled = 1. For each, find their
+    active-benefits-due-today and email them at notification_email (falling
+    back to their login email). Returns the total count of benefits emailed
+    across all users. force=True bypasses the "already sent" dedup check.
+    """
+    db = get_db()
+    gmail_user = get_setting(db, 'gmail_user')
+    gmail_pass = get_setting(db, 'gmail_app_password')
+    if not all([gmail_user, gmail_pass]):
+        db.close()
+        return 0
+
+    users = db.execute('''
+        SELECT id, email, notification_email
+        FROM users
+        WHERE reminders_enabled = 1
+    ''').fetchall()
+
+    total_sent = 0
+
+    for user in users:
+        uid       = user['id']
+        recipient = user['notification_email'] or user['email']
+        if not recipient:
+            continue
+
+        raw = db.execute('''
+            SELECT b.*, c.name AS card_name
+            FROM benefits b
+            JOIN cards c       ON c.id      = b.card_id
+            JOIN user_cards uc ON uc.card_id = c.id
+            LEFT JOIN user_benefits ub ON ub.benefit_id = b.id AND ub.user_id = ?
+            WHERE uc.user_id = ? AND uc.active = 1
+                  AND b.active = 1 AND c.active = 1
+                  AND COALESCE(ub.active, 1) = 1
+        ''', (uid, uid)).fetchall()
+
+        benefits_due = []
+        for row in raw:
+            b = enrich_benefit(db, row, uid)
+            if b['fully_used']:
+                continue
+            period_start_str = str(b['period_start'])
+            dl = b['days_left']
+            for days_before in b['reminder_days']:
+                if dl == days_before or (force and dl <= days_before):
+                    already_sent = db.execute(
+                        'SELECT 1 FROM sent_reminders WHERE user_id=? AND benefit_id=? AND period_start=? AND days_before=?',
+                        (uid, b['id'], period_start_str, days_before)
+                    ).fetchone()
+                    if not already_sent or force:
+                        benefits_due.append({
+                            'card_name':     row['card_name'],
+                            'benefit_name':  b['name'],
+                            'credit_amount': b['credit_amount'],
+                            'amount_used':   b['amount_used'],
+                            'period_end':    b['period_end'].strftime('%b %d, %Y'),
+                            'days_left':     dl,
+                        })
+                        if not already_sent:
+                            db.execute(
+                                'INSERT OR IGNORE INTO sent_reminders (user_id, benefit_id, period_start, days_before) '
+                                'VALUES (?, ?, ?, ?)',
+                                (uid, b['id'], period_start_str, days_before))
+                        break  # only include a benefit once per email
+
+        if benefits_due:
+            try:
+                send_reminder_email(gmail_user, gmail_pass, recipient, benefits_due)
+                db.commit()
+                total_sent += len(benefits_due)
+            except Exception as e:
+                app.logger.error(f'Failed to send reminder email to user {uid} ({recipient}): {e}')
+                db.rollback()
+
+    db.close()
+    return total_sent
 
 
 # ── Scheduler ──────────────────────────────────────────────────────────────────

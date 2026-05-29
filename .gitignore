@@ -1,4 +1,5 @@
 *.db
+*.db.bak*
 .secret_key
 .credentials
 __pycache__/
