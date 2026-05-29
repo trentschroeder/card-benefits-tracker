@@ -30,12 +30,6 @@
 </div>
 {% endif %}
 
-{% if g.user.is_admin %}
-<div class="mb-3 small text-muted">
-  <i class="bi bi-tools me-1"></i>Admin:
-  <a href="{{ url_for('catalog_card_edit', card_id=card.id) }}">Edit catalog details for {{ card.name }}</a>
-</div>
-{% endif %}
 
 <!-- Benefits list -->
 <div class="d-flex justify-content-between align-items-center mb-3">
