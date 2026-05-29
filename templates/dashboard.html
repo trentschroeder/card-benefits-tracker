@@ -536,14 +536,44 @@
     </div>
     {% endif %}
 
-    <!-- Inactive benefits (collapsed) -->
-    {% if dc.inactive %}
-    <div class="done-footer" onclick="toggleSection('inactive-{{ card.id }}', 'inactive-chevron-{{ card.id }}')">
-      <i class="bi bi-chevron-right" id="inactive-chevron-{{ card.id }}" style="font-size:.65rem; transition:transform .2s;"></i>
-      <span><i class="bi bi-archive me-1"></i>{{ dc.inactive | length }} inactive</span>
+    <!-- Not pursuing (per-user opt-out) -->
+    {% if dc.not_pursuing %}
+    <div class="done-footer" onclick="toggleSection('notpursuing-{{ card.id }}', 'notpursuing-chevron-{{ card.id }}')">
+      <i class="bi bi-chevron-right" id="notpursuing-chevron-{{ card.id }}" style="font-size:.65rem; transition:transform .2s;"></i>
+      <span><i class="bi bi-eye-slash me-1"></i>{{ dc.not_pursuing | length }} not pursuing</span>
     </div>
-    <div id="inactive-{{ card.id }}" style="display:none;">
-      {% for b in dc.inactive %}
+    <div id="notpursuing-{{ card.id }}" style="display:none;">
+      {% for b in dc.not_pursuing %}
+        <div class="benefit-row done-row">
+          <span class="row-dot" style="background:#adb5bd;"></span>
+          <a href="{{ url_for('benefit_edit', id=b.id) }}" class="row-name text-muted fw-normal"
+             style="text-decoration:none; color:inherit;">{{ b.name }}</a>
+          <span class="row-period">{{ b.period_type }}</span>
+          {% if b.credit_amount %}
+            <div class="row-bar-wrap"></div>
+            <span class="row-amount text-muted">${{ "%.0f"|format(b.credit_amount) }}</span>
+          {% else %}
+            <div class="row-bar-wrap"></div>
+            <span class="row-amount text-muted">—</span>
+          {% endif %}
+          <form method="post" action="{{ url_for('benefit_pursue_toggle', id=b.id) }}" class="row-action" style="margin:0;">
+            <button type="submit" class="btn btn-link btn-sm p-0" title="Resume pursuing">
+              <i class="bi bi-arrow-counterclockwise"></i>
+            </button>
+          </form>
+        </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    <!-- Catalog-archived (admin marked inactive) -->
+    {% if dc.archived %}
+    <div class="done-footer" onclick="toggleSection('archived-{{ card.id }}', 'archived-chevron-{{ card.id }}')">
+      <i class="bi bi-chevron-right" id="archived-chevron-{{ card.id }}" style="font-size:.65rem; transition:transform .2s;"></i>
+      <span><i class="bi bi-archive me-1"></i>{{ dc.archived | length }} archived</span>
+    </div>
+    <div id="archived-{{ card.id }}" style="display:none;">
+      {% for b in dc.archived %}
         <div class="benefit-row done-row">
           <span class="row-dot" style="background:#adb5bd;"></span>
           <a href="{{ url_for('benefit_edit', id=b.id) }}" class="row-name text-muted fw-normal"

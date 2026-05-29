@@ -882,12 +882,16 @@ def dashboard():
         total_benefits += len(enriched)
         total_used += sum(1 for b in enriched if b['fully_used'])
 
-        # "Inactive" panel shows both catalog-inactive AND user-hidden benefits,
-        # so the user can re-enable them from the dashboard if desired.
-        inactive = db.execute('''
+        # Split set-aside benefits into two distinct lists: catalog-archived
+        # (admin marked inactive) vs. user-not-pursuing (per-user opt-out).
+        archived = db.execute(
+            'SELECT * FROM benefits WHERE card_id = ? AND active = 0 ORDER BY name',
+            (card['id'],)
+        ).fetchall()
+        not_pursuing = db.execute('''
             SELECT b.* FROM benefits b
-            LEFT JOIN user_benefits ub ON ub.benefit_id = b.id AND ub.user_id = ?
-            WHERE b.card_id = ? AND (b.active = 0 OR COALESCE(ub.active, 1) = 0)
+            JOIN user_benefits ub ON ub.benefit_id = b.id AND ub.user_id = ?
+            WHERE b.card_id = ? AND b.active = 1 AND ub.active = 0
             ORDER BY b.name
         ''', (uid, card['id'])).fetchall()
 
@@ -901,7 +905,9 @@ def dashboard():
             'fee_tick_pct':  min(100, int(annual_fee / max_possible * 100)) if (annual_fee > 0 and max_possible > 0) else None,
         }
         dashboard_cards.append({'card': dict(card), 'benefits': enriched,
-                                'inactive': [dict(b) for b in inactive], 'roi': roi})
+                                'archived':     [dict(b) for b in archived],
+                                'not_pursuing': [dict(b) for b in not_pursuing],
+                                'roi': roi})
 
     total_captured = sum(dc['roi']['captured'] for dc in dashboard_cards)
     total_fees     = sum(dc['card']['annual_fee'] or 0 for dc in dashboard_cards)
@@ -934,7 +940,7 @@ def card_templates():
         FROM cards c
         LEFT JOIN benefits b   ON b.card_id  = c.id AND b.active = 1
         LEFT JOIN user_cards uc ON uc.card_id = c.id AND uc.user_id = ?
-        WHERE c.published = 1
+        WHERE c.published = 1 AND c.active = 1
         GROUP BY c.id
         ORDER BY c.name
     ''', (g.user['id'],)).fetchall()
@@ -948,7 +954,7 @@ def card_templates_add(card_id):
     db   = get_db()
     uid  = g.user['id']
     card = db.execute(
-        'SELECT id, name FROM cards WHERE id = ? AND published = 1', (card_id,)
+        'SELECT id, name FROM cards WHERE id = ? AND published = 1 AND active = 1', (card_id,)
     ).fetchone()
     if not card:
         db.close()
@@ -1247,9 +1253,10 @@ def benefit_edit(id):
         # a dedicated per-user toggle on the card detail row (benefit_pursue_toggle).
         _save_reminders(reminder_days, custom_day)
         db.commit()
-        card_id = b['card_id']
+        card_id      = b['card_id']
+        display_name = name if is_admin else b['name']
         db.close()
-        flash(f'Benefit "{b["name"]}" updated.', 'success')
+        flash(f'Benefit "{display_name}" updated.', 'success')
         next_url = request.form.get('_next') or url_for('card_detail', id=card_id)
         return redirect(next_url)
 
