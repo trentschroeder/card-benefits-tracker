@@ -1242,19 +1242,19 @@ def benefit_edit(id):
                 'UPDATE benefits SET name=?, description=?, credit_amount=?, period_type=?, is_subscription=?, '
                 'active=? WHERE id=?',
                 (name, description, credit_amount, period_type, is_subscription, active, id))
+
+        # "Pursuing" is per-user for every role (admin can opt out of their own pursuit too)
+        pursuing = 1 if request.form.get('pursuing') else 0
+        existing = db.execute(
+            'SELECT id FROM user_benefits WHERE user_id = ? AND benefit_id = ?',
+            (uid, id)).fetchone()
+        if existing:
+            db.execute('UPDATE user_benefits SET active = ? WHERE id = ?',
+                       (pursuing, existing['id']))
         else:
-            # Non-admin: only their own per-user hide/show is editable.
-            user_active = 1 if request.form.get('active') else 0
-            existing = db.execute(
-                'SELECT id FROM user_benefits WHERE user_id = ? AND benefit_id = ?',
-                (uid, id)).fetchone()
-            if existing:
-                db.execute('UPDATE user_benefits SET active = ? WHERE id = ?',
-                           (user_active, existing['id']))
-            else:
-                db.execute(
-                    'INSERT INTO user_benefits (user_id, benefit_id, active) VALUES (?, ?, ?)',
-                    (uid, id, user_active))
+            db.execute(
+                'INSERT INTO user_benefits (user_id, benefit_id, active) VALUES (?, ?, ?)',
+                (uid, id, pursuing))
 
         _save_reminders(reminder_days, custom_day)
         db.commit()
@@ -1268,15 +1268,12 @@ def benefit_edit(id):
         'SELECT days_before FROM reminders WHERE user_id = ? AND benefit_id = ?',
         (uid, id)
     ).fetchall()]
-    if is_admin:
-        form_data = dict(b)
-    else:
-        # Pre-fill the "active" checkbox from the per-user override (default visible)
-        ub = db.execute(
-            'SELECT active FROM user_benefits WHERE user_id = ? AND benefit_id = ?',
-            (uid, id)).fetchone()
-        form_data = dict(b)
-        form_data['active'] = ub['active'] if ub else 1
+    # Per-user "pursuing" defaults to True unless they've explicitly opted out
+    ub = db.execute(
+        'SELECT active FROM user_benefits WHERE user_id = ? AND benefit_id = ?',
+        (uid, id)).fetchone()
+    form_data = dict(b)
+    form_data['pursuing'] = ub['active'] if ub else 1
     db.close()
     return render_template('benefits/form.html', card=card, form=form_data,
                            benefit=b, existing_reminder_days=existing_days,

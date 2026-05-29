@@ -115,15 +115,19 @@
         </div>
 
         {% if benefit %}
+        {% if g.user.is_admin %}
         <div class="mb-3 form-check">
           <input name="active" type="checkbox" class="form-check-input" id="activeCheck"
                  {% if form.get('active', 1) %}checked{% endif %}>
-          <label class="form-check-label" for="activeCheck">
-            {% if g.user.is_admin %}Active in catalog{% else %}Show on my dashboard{% endif %}
-          </label>
-          {% if not g.user.is_admin %}
-          <div class="form-text">When off, this benefit is hidden from your dashboard and skipped in reminder/summary emails. Your redemption history is preserved.</div>
-          {% endif %}
+          <label class="form-check-label" for="activeCheck">Active in catalog</label>
+          <div class="form-text">When off, this benefit is removed from every user's dashboard.</div>
+        </div>
+        {% endif %}
+        <div class="mb-3 form-check">
+          <input name="pursuing" type="checkbox" class="form-check-input" id="pursuingCheck"
+                 {% if form.get('pursuing', 1) %}checked{% endif %}>
+          <label class="form-check-label" for="pursuingCheck">I'm pursuing this benefit</label>
+          <div class="form-text">When off, this benefit is hidden from your dashboard and skipped in your reminder/summary emails. Your redemption history is preserved. Only affects you.</div>
         </div>
         {% endif %}
 
