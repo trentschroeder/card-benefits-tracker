@@ -748,12 +748,14 @@
             <i class="bi bi-credit-card me-1"></i>Cards
           </a>
         </li>
+        {% if g.user and g.user.is_admin %}
         <li class="nav-item">
           <a class="nav-link {% if request.path == '/card-templates' %}active{% endif %}"
              href="{{ url_for('card_templates') }}">
             <i class="bi bi-collection me-1"></i>Card Templates
           </a>
         </li>
+        {% endif %}
         {% if g.user %}
         <li class="nav-item">
           <a class="nav-link {% if request.path == '/preferences' %}active{% endif %}"
@@ -817,11 +819,13 @@
     <i class="bi bi-credit-card"></i>
     <span>Cards</span>
   </a>
+  {% if g.user and g.user.is_admin %}
   <a class="tab-item {% if request.path == '/card-templates' %}active{% endif %}"
      href="{{ url_for('card_templates') }}">
     <i class="bi bi-collection"></i>
     <span>Templates</span>
   </a>
+  {% endif %}
   {% if g.user %}
   <a class="tab-item {% if request.path == '/preferences' %}active{% endif %}"
      href="{{ url_for('preferences') }}">
