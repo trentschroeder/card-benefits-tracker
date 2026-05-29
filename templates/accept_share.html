@@ -1,0 +1,46 @@
+{% extends 'base.html' %}
+{% block title %}Share invitation — Card Benefits{% endblock %}
+{% block content %}
+
+<div class="row justify-content-center mt-5">
+  <div class="col-sm-10 col-md-7 col-lg-5">
+    <div class="card p-4">
+      {% if invalid %}
+        <h4 class="mb-3"><i class="bi bi-exclamation-triangle text-danger me-2"></i>Share invitation invalid</h4>
+        {% if wrong_user_msg %}
+          <p class="text-muted">
+            This share invitation was sent to a different account.
+            Sign out and sign back in as the invited user, or ask the sender to share with your account.
+          </p>
+        {% else %}
+          <p class="text-muted">
+            This share invitation is no longer valid — it may have been used already,
+            expired, or replaced by a newer one. Ask the sender to share again.
+          </p>
+        {% endif %}
+        <a href="{{ url_for('dashboard') }}" class="btn btn-outline-secondary mt-2">Back to dashboard</a>
+      {% else %}
+        <h4 class="mb-3"><i class="bi bi-people me-2"></i>Share invitation</h4>
+        <p>
+          <strong>{{ inviter_email }}</strong> wants to share
+          <strong>{{ card_name }}</strong> with you.
+        </p>
+        <p class="text-muted small">
+          If you accept, redemptions on this card become pooled — you'll both see
+          everything either of you has logged, and either of you can add, edit, or
+          delete redemptions. Your reminder preferences stay personal.
+        </p>
+        <form method="post" class="d-flex gap-2 mt-3">
+          <button name="action" value="accept" class="btn btn-primary flex-grow-1">
+            <i class="bi bi-check-circle me-1"></i>Accept
+          </button>
+          <button name="action" value="decline" class="btn btn-outline-secondary flex-grow-1">
+            <i class="bi bi-x-circle me-1"></i>Decline
+          </button>
+        </form>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+{% endblock %}

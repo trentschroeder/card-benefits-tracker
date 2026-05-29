@@ -3,6 +3,40 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
 
+def send_share_invite_email(gmail_user, gmail_app_password, recipient, accept_url, inviter_email, card_name):
+    subject = f"{inviter_email} wants to share a card with you"
+    html = f"""
+    <html><body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#333;max-width:560px;">
+      <h2 style="color:#1a3c8a;">Card share invitation</h2>
+      <p><strong>{inviter_email}</strong> wants to share <strong>{card_name}</strong> with you on Card Benefits.</p>
+      <p>If you accept, you'll both pool redemptions on this card — each of you will see everything the other has logged, and either of you can add, edit, or delete redemptions. Your reminder preferences stay personal.</p>
+      <p style="margin:24px 0;">
+        <a href="{accept_url}" style="background:#1a3c8a;color:#fff;text-decoration:none;
+            padding:12px 22px;border-radius:6px;font-weight:600;display:inline-block;">
+          Review the invitation
+        </a>
+      </p>
+      <p style="font-size:13px;color:#666;">
+        If the button doesn't work, paste this URL into your browser:<br>
+        <a href="{accept_url}">{accept_url}</a>
+      </p>
+      <p style="font-size:12px;color:#999;border-top:1px solid #eee;padding-top:12px;margin-top:24px;">
+        The link expires in 24 hours. If you didn't expect this, you can safely ignore the email — nothing happens until you click Accept.
+      </p>
+    </body></html>
+    """
+
+    msg = MIMEMultipart('alternative')
+    msg['Subject'] = subject
+    msg['From']    = gmail_user
+    msg['To']      = recipient
+    msg.attach(MIMEText(html, 'html'))
+
+    with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
+        server.login(gmail_user, gmail_app_password)
+        server.sendmail(gmail_user, recipient, msg.as_string())
+
+
 def send_reset_email(gmail_user, gmail_app_password, recipient, reset_url):
     subject = "Reset your Card Benefits password"
     html = f"""

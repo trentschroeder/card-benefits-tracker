@@ -42,14 +42,18 @@ CREATE TABLE IF NOT EXISTS impersonation_log (
 );
 
 CREATE TABLE IF NOT EXISTS invitations (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id     INTEGER NOT NULL,
-    token_hash  TEXT    NOT NULL UNIQUE,
-    purpose     TEXT    NOT NULL DEFAULT 'invite',
-    expires_at  TIMESTAMP NOT NULL,
-    used_at     TIMESTAMP,
-    created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id         INTEGER NOT NULL,
+    inviter_user_id INTEGER,
+    card_id         INTEGER,
+    token_hash      TEXT    NOT NULL UNIQUE,
+    purpose         TEXT    NOT NULL DEFAULT 'invite',
+    expires_at      TIMESTAMP NOT NULL,
+    used_at         TIMESTAMP,
+    created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id)         REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (inviter_user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (card_id)         REFERENCES cards(id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS card_share_groups (

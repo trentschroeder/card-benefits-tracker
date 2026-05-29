@@ -10,7 +10,8 @@ from werkzeug.security import check_password_hash, generate_password_hash
 
 from periods import get_current_period, days_left, PERIOD_LABELS
 from email_sender import (send_reminder_email, send_summary_email,
-                           send_invite_email, send_reset_email)
+                           send_invite_email, send_reset_email,
+                           send_share_invite_email)
 
 app = Flask(__name__)
 
@@ -132,6 +133,16 @@ def init_db():
         db.commit()
     except Exception:
         pass
+    # Phase 9b: invitations gain inviter_user_id + card_id for share invites
+    for col, decl in [
+        ('inviter_user_id', 'INTEGER REFERENCES users(id) ON DELETE CASCADE'),
+        ('card_id',         'INTEGER REFERENCES cards(id) ON DELETE CASCADE'),
+    ]:
+        try:
+            db.execute(f'ALTER TABLE invitations ADD COLUMN {col} {decl}')
+            db.commit()
+        except Exception:
+            pass
     _migrate_subscriptions_to_redemptions(db)
     _drop_last_subscription_period_if_exists(db)
     _migrate_credentials_file_to_users(db)
@@ -575,24 +586,35 @@ def _hash_invite_token(raw_token):
 
 
 def _ttl_for_purpose(purpose):
-    if purpose == 'reset':
+    if purpose in ('reset', 'share'):
         return timedelta(hours=RESET_TTL_HOURS)
     return timedelta(days=INVITE_TTL_DAYS)
 
 
-def _create_token(db, user_id, purpose='invite'):
-    """Generate a new one-time token for this user + purpose. Revokes any
-    prior unused tokens of the SAME purpose so only the latest is valid.
-    Token TTL varies by purpose (7 days invite, 24 hours reset)."""
-    db.execute(
-        'DELETE FROM invitations WHERE user_id = ? AND used_at IS NULL AND purpose = ?',
-        (user_id, purpose))
+def _create_token(db, user_id, purpose='invite', inviter_user_id=None, card_id=None):
+    """Generate a new one-time token for this user + purpose. Revokes prior
+    unused tokens of the SAME purpose so only the latest is valid; for
+    share invites the revoke is scoped to (invitee, card) so a share for
+    Card A doesn't clobber a pending share for Card B.
+
+    Token TTL varies by purpose (7 days invite, 24 hours reset/share)."""
+    if purpose == 'share' and card_id is not None:
+        db.execute(
+            "DELETE FROM invitations WHERE user_id = ? AND used_at IS NULL "
+            "AND purpose = 'share' AND card_id = ?",
+            (user_id, card_id))
+    else:
+        db.execute(
+            'DELETE FROM invitations WHERE user_id = ? AND used_at IS NULL AND purpose = ?',
+            (user_id, purpose))
     raw_token  = secrets.token_urlsafe(32)
     token_hash = _hash_invite_token(raw_token)
     expires_at = _now_utc() + _ttl_for_purpose(purpose)
     db.execute(
-        'INSERT INTO invitations (user_id, token_hash, purpose, expires_at) VALUES (?, ?, ?, ?)',
-        (user_id, token_hash, purpose, expires_at.isoformat(timespec='seconds')))
+        'INSERT INTO invitations (user_id, token_hash, purpose, expires_at, inviter_user_id, card_id) '
+        'VALUES (?, ?, ?, ?, ?, ?)',
+        (user_id, token_hash, purpose, expires_at.isoformat(timespec='seconds'),
+         inviter_user_id, card_id))
     return raw_token
 
 
@@ -1011,6 +1033,175 @@ def card_templates_add(card_id):
     db.close()
     flash(f'"{card["name"]}" added to your dashboard.', 'success')
     return redirect(url_for('dashboard'))
+
+
+@app.route('/cards/<int:id>/share', methods=['POST'])
+@login_required
+def card_share(id):
+    """Invite an existing user to pool redemptions on a card the current
+    user already has on their dashboard."""
+    db        = get_db()
+    uid       = g.user['id']
+    inviter   = g.user
+    raw_email = request.form.get('email', '').strip()
+    if not raw_email:
+        db.close()
+        flash('Enter the email of the user you want to share with.', 'danger')
+        return redirect(url_for('card_detail', id=id))
+
+    my_uc = db.execute(
+        'SELECT id, share_group_id FROM user_cards WHERE user_id = ? AND card_id = ?',
+        (uid, id)).fetchone()
+    if not my_uc:
+        db.close()
+        flash('You can only share a card that is on your own dashboard.', 'danger')
+        return redirect(url_for('cards_list'))
+
+    invitee = db.execute('SELECT id, email FROM users WHERE email = ?', (raw_email,)).fetchone()
+    if not invitee:
+        db.close()
+        flash(f'No user found with email {raw_email}. Ask the administrator to invite them first.', 'danger')
+        return redirect(url_for('card_detail', id=id))
+    if invitee['id'] == uid:
+        db.close()
+        flash("You can't share a card with yourself.", 'danger')
+        return redirect(url_for('card_detail', id=id))
+
+    # If invitee already shares this card with the current user, no-op
+    if my_uc['share_group_id'] is not None:
+        already = db.execute(
+            'SELECT 1 FROM card_share_members WHERE group_id = ? AND user_id = ?',
+            (my_uc['share_group_id'], invitee['id'])).fetchone()
+        if already:
+            db.close()
+            flash(f'{invitee["email"]} already shares this card with you.', 'info')
+            return redirect(url_for('card_detail', id=id))
+
+    card = db.execute('SELECT id, name FROM cards WHERE id = ?', (id,)).fetchone()
+    raw_token = _create_token(db, invitee['id'], purpose='share',
+                              inviter_user_id=uid, card_id=id)
+    db.commit()
+
+    gmail_user = get_setting(db, 'gmail_user')
+    gmail_pass = get_setting(db, 'gmail_app_password')
+    if not all([gmail_user, gmail_pass]):
+        db.close()
+        flash('Share invitation created but the email could not be sent — SMTP is not configured.', 'warning')
+        return redirect(url_for('card_detail', id=id))
+    accept_url = url_for('accept_share', token=raw_token, _external=True)
+    try:
+        send_share_invite_email(gmail_user, gmail_pass, invitee['email'],
+                                accept_url, inviter['email'], card['name'])
+    except Exception as e:
+        db.close()
+        flash(f'Failed to send share invitation to {invitee["email"]}: {e}', 'danger')
+        return redirect(url_for('card_detail', id=id))
+    db.close()
+    flash(f'Share invitation sent to {invitee["email"]}. Expires in {RESET_TTL_HOURS} hours.', 'success')
+    return redirect(url_for('card_detail', id=id))
+
+
+@app.route('/accept-share/<token>', methods=['GET', 'POST'])
+@login_required
+def accept_share(token):
+    db  = get_db()
+    inv = _consume_valid_token(db, token, purpose='share')
+    if not inv:
+        db.close()
+        return render_template('accept_share.html', invalid=True), 410
+    # The token's user_id is the invitee. Reject if the wrong user is logged in.
+    if inv['user_id'] != g.user['id']:
+        db.close()
+        return render_template('accept_share.html', invalid=True,
+                                wrong_user_msg=True), 403
+
+    # Load context for display + action
+    extra = db.execute('''
+        SELECT i.card_id, i.inviter_user_id,
+               c.name AS card_name,
+               u.email AS inviter_email
+        FROM invitations i
+        JOIN cards c ON c.id = i.card_id
+        JOIN users u ON u.id = i.inviter_user_id
+        WHERE i.id = ?
+    ''', (inv['invite_id'],)).fetchone()
+    if not extra:
+        db.close()
+        return render_template('accept_share.html', invalid=True), 410
+
+    if request.method == 'POST':
+        action = request.form.get('action')
+        if action == 'decline':
+            db.execute('UPDATE invitations SET used_at = ? WHERE id = ?',
+                       (_now_utc().isoformat(timespec='seconds'), inv['invite_id']))
+            db.commit()
+            db.close()
+            flash(f'Declined share invitation for {extra["card_name"]}.', 'info')
+            return redirect(url_for('dashboard'))
+        if action != 'accept':
+            db.close()
+            flash('Unknown action.', 'danger')
+            return redirect(url_for('accept_share', token=token))
+
+        card_id     = extra['card_id']
+        inviter_id  = extra['inviter_user_id']
+        invitee_id  = inv['user_id']
+
+        # Find the inviter's user_cards row — they must have the card.
+        inviter_uc = db.execute(
+            'SELECT id, share_group_id FROM user_cards WHERE user_id = ? AND card_id = ?',
+            (inviter_id, card_id)).fetchone()
+        if not inviter_uc:
+            db.close()
+            flash("The inviter no longer has this card. Ask them to share again.", 'danger')
+            return redirect(url_for('dashboard'))
+
+        # Resolve / create the share group
+        if inviter_uc['share_group_id'] is not None:
+            group_id = inviter_uc['share_group_id']
+        else:
+            cur = db.execute('INSERT INTO card_share_groups (card_id) VALUES (?)', (card_id,))
+            group_id = cur.lastrowid
+            db.execute(
+                'INSERT OR IGNORE INTO card_share_members (group_id, user_id) VALUES (?, ?)',
+                (group_id, inviter_id))
+            db.execute(
+                'UPDATE user_cards SET share_group_id = ? WHERE id = ?',
+                (group_id, inviter_uc['id']))
+
+        # Make sure the invitee has a user_cards row pointing at this group
+        invitee_uc = db.execute(
+            'SELECT id, share_group_id FROM user_cards WHERE user_id = ? AND card_id = ?',
+            (invitee_id, card_id)).fetchone()
+        if invitee_uc:
+            if invitee_uc['share_group_id'] not in (None, group_id):
+                db.close()
+                flash("You're already in a different share for this card. Leave that one first, then re-accept.", 'danger')
+                return redirect(url_for('dashboard'))
+            db.execute(
+                'UPDATE user_cards SET share_group_id = ?, active = 1 WHERE id = ?',
+                (group_id, invitee_uc['id']))
+        else:
+            db.execute(
+                'INSERT INTO user_cards (user_id, card_id, active, share_group_id) VALUES (?, ?, 1, ?)',
+                (invitee_id, card_id, group_id))
+
+        db.execute(
+            'INSERT OR IGNORE INTO card_share_members (group_id, user_id) VALUES (?, ?)',
+            (group_id, invitee_id))
+        db.execute('UPDATE invitations SET used_at = ? WHERE id = ?',
+                   (_now_utc().isoformat(timespec='seconds'), inv['invite_id']))
+        db.commit()
+        db.close()
+        flash(f'You now share {extra["card_name"]} with {extra["inviter_email"]}.', 'success')
+        return redirect(url_for('dashboard'))
+
+    db.close()
+    return render_template('accept_share.html',
+                            invalid=False,
+                            card_name=extra['card_name'],
+                            inviter_email=extra['inviter_email'],
+                            token=token)
 
 
 @app.route('/cards/<int:id>/remove', methods=['POST'])

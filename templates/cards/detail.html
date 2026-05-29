@@ -2,10 +2,14 @@
 {% block title %}{{ card.name }} — Card Benefits{% endblock %}
 {% block content %}
 
-<div class="d-flex align-items-center gap-2 mb-4">
+<div class="d-flex align-items-center gap-2 mb-4 flex-wrap">
   <h2 class="mb-0">{{ card.name }}</h2>
   {% if not card.active %}<span class="badge bg-secondary">Inactive</span>{% endif %}
   <button type="button" class="btn btn-outline-secondary btn-sm ms-auto"
+          data-bs-toggle="modal" data-bs-target="#shareCardModal">
+    <i class="bi bi-people me-1"></i>Share this card
+  </button>
+  <button type="button" class="btn btn-outline-secondary btn-sm"
           data-bs-toggle="modal" data-bs-target="#removeCardModal">
     <i class="bi bi-dash-circle me-1"></i>Remove from my dashboard
   </button>
@@ -154,6 +158,37 @@
   </table>
 </div>
 {% endif %}
+
+<!-- Share card modal (all users) -->
+<div class="modal fade" id="shareCardModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h6 class="modal-title"><i class="bi bi-people me-1"></i>Share this card</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <form method="post" action="{{ url_for('card_share', id=card.id) }}">
+        <div class="modal-body">
+          <p class="text-muted small mb-3">
+            Invite an existing user to pool redemptions on <strong>{{ card.name }}</strong>.
+            Once they accept, you'll both see every redemption and either of you can
+            add, edit, or delete them. Personal reminder preferences stay private.
+          </p>
+          <label class="form-label">Their email</label>
+          <input name="email" type="email" class="form-control"
+                 placeholder="friend@example.com" required autocomplete="off">
+          <div class="form-text">They have to already have an account. Ask the administrator to invite them first if not.</div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+          <button class="btn btn-primary btn-sm">
+            <i class="bi bi-envelope-plus me-1"></i>Send invitation
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
 
 <!-- Remove from dashboard modal (all users) -->
 <div class="modal fade" id="removeCardModal" tabindex="-1">
