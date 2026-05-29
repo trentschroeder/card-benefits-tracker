@@ -752,7 +752,7 @@
         <li class="nav-item">
           <a class="nav-link {% if request.path == '/card-templates' %}active{% endif %}"
              href="{{ url_for('card_templates') }}">
-            <i class="bi bi-collection me-1"></i>Card Templates
+            <i class="bi bi-collection me-1"></i>Add a Card
           </a>
         </li>
         {% endif %}
@@ -823,7 +823,7 @@
   <a class="tab-item {% if request.path == '/card-templates' %}active{% endif %}"
      href="{{ url_for('card_templates') }}">
     <i class="bi bi-collection"></i>
-    <span>Templates</span>
+    <span>Add Card</span>
   </a>
   {% endif %}
   {% if g.user %}

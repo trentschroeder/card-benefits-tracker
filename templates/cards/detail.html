@@ -1,13 +1,19 @@
 {% extends 'base.html' %}
-{% block title %}{{ card.name }} — Card Benefits{% endblock %}
+{% block title %}{{ card.display_name }} — Card Benefits{% endblock %}
 {% block content %}
 
-<div class="d-flex align-items-center gap-2 mb-4 flex-wrap">
-  <h2 class="mb-0">{{ card.name }}</h2>
+<div class="d-flex align-items-center gap-2 mb-2 flex-wrap">
+  <h2 class="mb-0">{{ card.display_name }}</h2>
+  {% if card.nickname %}<span class="text-muted">({{ card.name }})</span>{% endif %}
   {% if not card.active %}<span class="badge bg-secondary">Inactive</span>{% endif %}
+  {% if card.share_group_id %}<span class="badge bg-info text-dark"><i class="bi bi-people me-1"></i>Shared</span>{% endif %}
   <button type="button" class="btn btn-outline-secondary btn-sm ms-auto"
           data-bs-toggle="modal" data-bs-target="#shareCardModal">
     <i class="bi bi-people me-1"></i>Share this card
+  </button>
+  <button type="button" class="btn btn-outline-secondary btn-sm"
+          data-bs-toggle="modal" data-bs-target="#renameCardModal">
+    <i class="bi bi-pencil me-1"></i>Rename
   </button>
   <button type="button" class="btn btn-outline-secondary btn-sm"
           data-bs-toggle="modal" data-bs-target="#removeCardModal">
@@ -15,45 +21,20 @@
   </button>
 </div>
 
-<!-- Edit card (admin only) -->
+{% if share_members %}
+<div class="text-muted small mb-3">
+  <i class="bi bi-people me-1"></i>Shared with:
+  {% for m in share_members %}
+    <strong>{{ m.email }}</strong>{% if m.nickname %} ({{ m.nickname }}){% endif %}{% if not loop.last %}, {% endif %}
+  {% endfor %}
+</div>
+{% endif %}
+
 {% if g.user.is_admin %}
-<details class="card p-3 mb-4">
-  <summary class="fw-semibold" style="cursor:pointer;list-style:none;">
-    <i class="bi bi-pencil me-1"></i>Edit Card Details
-  </summary>
-  <form method="post" class="mt-3">
-    <div class="row g-3">
-      <div class="col-sm-8">
-        <label class="form-label">Card Name</label>
-        <input name="name" type="text" class="form-control" value="{{ card.name }}" required>
-      </div>
-      <div class="col-sm-4">
-        <label class="form-label">Annual Fee ($)</label>
-        <input name="annual_fee" type="number" step="0.01" min="0" class="form-control"
-               value="{{ card.annual_fee or '' }}" placeholder="e.g. 695">
-      </div>
-      <div class="col-12 form-check ms-1">
-        <input name="active" type="checkbox" class="form-check-input" id="activeCheck"
-               {% if card.active %}checked{% endif %}>
-        <label class="form-check-label" for="activeCheck">Active in catalog</label>
-        <div class="form-text">Off retires this card across every user's dashboard. Leave on unless the card itself is dead. To just hide it from Card Templates, uncheck Published instead.</div>
-      </div>
-      <div class="col-12 form-check ms-1">
-        <input name="published" type="checkbox" class="form-check-input" id="publishedCheck"
-               {% if card.published %}checked{% endif %}>
-        <label class="form-check-label" for="publishedCheck">Published</label>
-        <div class="form-text">When on, this card appears in Card Templates for other users to add to their dashboards.</div>
-      </div>
-    </div>
-    <div class="d-flex gap-2 mt-3">
-      <button class="btn btn-primary btn-sm">Save Changes</button>
-      <button type="button" class="btn btn-outline-danger btn-sm ms-auto"
-              data-bs-toggle="modal" data-bs-target="#deleteCardModal">
-        <i class="bi bi-trash me-1"></i>Delete Card
-      </button>
-    </div>
-  </form>
-</details>
+<div class="mb-3 small text-muted">
+  <i class="bi bi-tools me-1"></i>Admin:
+  <a href="{{ url_for('catalog_card_edit', card_id=card.id) }}">Edit catalog details for {{ card.name }}</a>
+</div>
 {% endif %}
 
 <!-- Benefits list -->
@@ -61,7 +42,7 @@
   <h4 class="mb-0">Benefits</h4>
   {% if g.user.is_admin %}
   <a href="{{ url_for('benefit_new', card_id=card.id) }}" class="btn btn-primary btn-sm">
-    <i class="bi bi-plus-lg me-1"></i>Add Benefit
+    <i class="bi bi-plus-lg me-1"></i>Add Benefit (catalog)
   </a>
   {% endif %}
 </div>
@@ -137,17 +118,17 @@
         </td>
         <td class="text-end">
           <div class="d-flex gap-1 justify-content-end">
-            <a href="{{ url_for('benefit_redemptions', id=b.id) }}" class="btn btn-outline-secondary btn-sm" title="History">
+            <a href="{{ url_for('benefit_redemptions', id=b.id, uc=card.user_card_id) }}" class="btn btn-outline-secondary btn-sm" title="History">
               <i class="bi bi-clock-history"></i>
             </a>
-            <form method="post" action="{{ url_for('benefit_pursue_toggle', id=b.id) }}" class="d-inline">
+            <form method="post" action="{{ url_for('benefit_pursue_toggle', id=b.id, uc=card.user_card_id) }}" class="d-inline">
               <button type="submit" class="btn btn-outline-secondary btn-sm"
                       title="{% if b.user_active == 0 %}Resume pursuing this benefit{% else %}Mark as not pursuing{% endif %}">
                 <i class="bi bi-{% if b.user_active == 0 %}eye{% else %}eye-slash{% endif %}"></i>
               </button>
             </form>
-            <a href="{{ url_for('benefit_edit', id=b.id) }}" class="btn btn-outline-secondary btn-sm"
-               title="{% if g.user.is_admin %}Edit{% else %}Edit reminders{% endif %}">
+            <a href="{{ url_for('benefit_edit', id=b.id, uc=card.user_card_id) }}" class="btn btn-outline-secondary btn-sm"
+               title="{% if g.user.is_admin %}Edit reminders{% else %}Edit reminders{% endif %}">
               <i class="bi bi-pencil"></i>
             </a>
           </div>
@@ -167,23 +148,50 @@
         <h6 class="modal-title"><i class="bi bi-people me-1"></i>Share this card</h6>
         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
       </div>
-      <form method="post" action="{{ url_for('card_share', id=card.id) }}">
+      <form method="post" action="{{ url_for('card_share', id=card.user_card_id) }}">
         <div class="modal-body">
           <p class="text-muted small mb-3">
-            Invite an existing user to pool redemptions on <strong>{{ card.name }}</strong>.
+            Invite an existing user to pool redemptions on <strong>{{ card.display_name }}</strong>.
             Once they accept, you'll both see every redemption and either of you can
             add, edit, or delete them. Personal reminder preferences stay private.
           </p>
           <label class="form-label">Their email</label>
           <input name="email" type="email" class="form-control"
                  placeholder="friend@example.com" required autocomplete="off">
-          <div class="form-text">They have to already have an account. Ask the administrator to invite them first if not.</div>
+          <div class="form-text">They have to already have an account.</div>
         </div>
         <div class="modal-footer">
           <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
           <button class="btn btn-primary btn-sm">
             <i class="bi bi-envelope-plus me-1"></i>Send invitation
           </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- Rename card modal -->
+<div class="modal fade" id="renameCardModal" tabindex="-1">
+  <div class="modal-dialog modal-sm">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h6 class="modal-title">Rename this card</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <form method="post" action="{{ url_for('user_card_rename', id=card.user_card_id) }}">
+        <div class="modal-body">
+          <p class="text-muted small mb-3">
+            Give this specific instance a nickname (e.g., "Personal Plat" vs "Business Plat").
+            Only you see it — the underlying card name stays <strong>{{ card.name }}</strong>.
+          </p>
+          <label class="form-label">Nickname</label>
+          <input name="nickname" type="text" class="form-control"
+                 value="{{ card.nickname or '' }}" placeholder="optional">
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+          <button class="btn btn-primary btn-sm">Save</button>
         </div>
       </form>
     </div>
@@ -199,39 +207,17 @@
         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
       </div>
       <div class="modal-body">
-        Remove <strong>{{ card.name }}</strong> from your dashboard? Your redemption history is preserved — you can re-add the card from Card Templates anytime.
+        Remove <strong>{{ card.display_name }}</strong> from your dashboard?
+        Your redemption history is preserved.
       </div>
       <div class="modal-footer">
         <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
-        <form method="post" action="{{ url_for('card_remove', id=card.id) }}">
+        <form method="post" action="{{ url_for('card_remove', id=card.user_card_id) }}">
           <button class="btn btn-primary btn-sm">Remove</button>
         </form>
       </div>
     </div>
   </div>
 </div>
-
-<!-- Delete card modal (admin only — wipes from templates and every user's dashboard) -->
-{% if g.user.is_admin %}
-<div class="modal fade" id="deleteCardModal" tabindex="-1">
-  <div class="modal-dialog modal-sm">
-    <div class="modal-content">
-      <div class="modal-header">
-        <h6 class="modal-title text-danger">Delete Card</h6>
-        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-      </div>
-      <div class="modal-body">
-        Delete <strong>{{ card.name }}</strong> and all its benefits and redemption history? This cannot be undone.
-      </div>
-      <div class="modal-footer">
-        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
-        <form method="post" action="{{ url_for('card_delete', id=card.id) }}">
-          <button class="btn btn-danger btn-sm">Delete</button>
-        </form>
-      </div>
-    </div>
-  </div>
-</div>
-{% endif %}
 
 {% endblock %}

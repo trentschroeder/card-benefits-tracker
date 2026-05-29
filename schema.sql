@@ -63,71 +63,73 @@ CREATE TABLE IF NOT EXISTS card_share_groups (
     FOREIGN KEY (card_id) REFERENCES cards(id) ON DELETE CASCADE
 );
 
-CREATE TABLE IF NOT EXISTS card_share_members (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    group_id    INTEGER NOT NULL,
-    user_id     INTEGER NOT NULL,
-    joined_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(group_id, user_id),
-    FOREIGN KEY (group_id) REFERENCES card_share_groups(id) ON DELETE CASCADE,
-    FOREIGN KEY (user_id)  REFERENCES users(id)             ON DELETE CASCADE
-);
-
 CREATE TABLE IF NOT EXISTS user_cards (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id         INTEGER NOT NULL,
     card_id         INTEGER NOT NULL,
     active          INTEGER NOT NULL DEFAULT 1,
     share_group_id  INTEGER,
+    nickname        TEXT,
     assigned_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(user_id, card_id),
+    -- No UNIQUE(user_id, card_id): a user may hold multiple instances of the
+    -- same catalog card with separate redemption tracking.
     FOREIGN KEY (user_id)        REFERENCES users(id)              ON DELETE CASCADE,
     FOREIGN KEY (card_id)        REFERENCES cards(id)              ON DELETE CASCADE,
     FOREIGN KEY (share_group_id) REFERENCES card_share_groups(id)  ON DELETE SET NULL
 );
 
+CREATE TABLE IF NOT EXISTS card_share_members (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    group_id     INTEGER NOT NULL,
+    user_card_id INTEGER NOT NULL,
+    joined_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(group_id, user_card_id),
+    FOREIGN KEY (group_id)     REFERENCES card_share_groups(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_card_id) REFERENCES user_cards(id)        ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS user_benefits (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id     INTEGER NOT NULL,
-    benefit_id  INTEGER NOT NULL,
-    active      INTEGER NOT NULL DEFAULT 1,
-    UNIQUE(user_id, benefit_id),
-    FOREIGN KEY (user_id)    REFERENCES users(id)    ON DELETE CASCADE,
-    FOREIGN KEY (benefit_id) REFERENCES benefits(id) ON DELETE CASCADE
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_card_id INTEGER NOT NULL,
+    benefit_id   INTEGER NOT NULL,
+    active       INTEGER NOT NULL DEFAULT 1,
+    UNIQUE(user_card_id, benefit_id),
+    FOREIGN KEY (user_card_id) REFERENCES user_cards(id) ON DELETE CASCADE,
+    FOREIGN KEY (benefit_id)   REFERENCES benefits(id)   ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS reminders (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id     INTEGER NOT NULL,
-    benefit_id  INTEGER NOT NULL,
-    days_before INTEGER NOT NULL,
-    UNIQUE(user_id, benefit_id, days_before),
-    FOREIGN KEY (user_id)    REFERENCES users(id)    ON DELETE CASCADE,
-    FOREIGN KEY (benefit_id) REFERENCES benefits(id) ON DELETE CASCADE
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_card_id INTEGER NOT NULL,
+    benefit_id   INTEGER NOT NULL,
+    days_before  INTEGER NOT NULL,
+    UNIQUE(user_card_id, benefit_id, days_before),
+    FOREIGN KEY (user_card_id) REFERENCES user_cards(id) ON DELETE CASCADE,
+    FOREIGN KEY (benefit_id)   REFERENCES benefits(id)   ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS redemptions (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id      INTEGER NOT NULL,
+    user_card_id INTEGER NOT NULL,
     benefit_id   INTEGER NOT NULL,
     period_start DATE    NOT NULL,
     amount       REAL,
     notes        TEXT,
     redeemed_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (user_id)    REFERENCES users(id)    ON DELETE CASCADE,
-    FOREIGN KEY (benefit_id) REFERENCES benefits(id) ON DELETE CASCADE
+    FOREIGN KEY (user_card_id) REFERENCES user_cards(id) ON DELETE CASCADE,
+    FOREIGN KEY (benefit_id)   REFERENCES benefits(id)   ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS sent_reminders (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id      INTEGER NOT NULL,
+    user_card_id INTEGER NOT NULL,
     benefit_id   INTEGER NOT NULL,
     period_start DATE    NOT NULL,
     days_before  INTEGER NOT NULL,
     sent_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(user_id, benefit_id, period_start, days_before),
-    FOREIGN KEY (user_id)    REFERENCES users(id)    ON DELETE CASCADE,
-    FOREIGN KEY (benefit_id) REFERENCES benefits(id) ON DELETE CASCADE
+    UNIQUE(user_card_id, benefit_id, period_start, days_before),
+    FOREIGN KEY (user_card_id) REFERENCES user_cards(id) ON DELETE CASCADE,
+    FOREIGN KEY (benefit_id)   REFERENCES benefits(id)   ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS settings (
@@ -137,5 +139,6 @@ CREATE TABLE IF NOT EXISTS settings (
 
 CREATE INDEX IF NOT EXISTS idx_benefits_card   ON benefits(card_id);
 CREATE INDEX IF NOT EXISTS idx_user_cards_user ON user_cards(user_id, active);
--- Indexes on redemptions/reminders/sent_reminders are created in init_db AFTER
--- the Phase 2 migration has added user_id to those tables on existing dbs.
+-- Indexes on the per-instance tables (redemptions/reminders/sent_reminders)
+-- are created by _ensure_user_scoped_indexes after the migration finishes,
+-- because on existing dbs the user_card_id column is added mid-migration.

@@ -143,20 +143,35 @@ def init_db():
             db.commit()
         except Exception:
             pass
+    # Phase 10: share invites identify the specific user_cards instance being
+    # shared, so a multi-instance inviter can pick which one to share.
+    try:
+        db.execute('ALTER TABLE invitations ADD COLUMN inviter_user_card_id '
+                   'INTEGER REFERENCES user_cards(id) ON DELETE CASCADE')
+        db.commit()
+    except Exception:
+        pass
     _migrate_subscriptions_to_redemptions(db)
     _drop_last_subscription_period_if_exists(db)
     _migrate_credentials_file_to_users(db)
     _migrate_scope_data_to_users(db)
+    _migrate_to_per_user_card(db)
     _ensure_user_scoped_indexes(db)
     db.close()
 
 
 def _ensure_user_scoped_indexes(db):
-    """Create indexes that reference user_id. Must run AFTER the Phase 2
-    migration has added the user_id column on existing dbs."""
-    db.execute('CREATE INDEX IF NOT EXISTS idx_redemptions_lookup ON redemptions(user_id, benefit_id, period_start)')
-    db.execute('CREATE INDEX IF NOT EXISTS idx_reminders_benefit  ON reminders(user_id, benefit_id)')
-    db.execute('CREATE INDEX IF NOT EXISTS idx_sent_reminders     ON sent_reminders(user_id, benefit_id, period_start)')
+    """Create the per-instance indexes. Must run AFTER the Phase 10 migration
+    has swapped user_id for user_card_id on the affected tables."""
+    # Drop legacy indexes (from before the user_card_id migration) if present
+    for legacy in ('idx_redemptions_lookup', 'idx_reminders_benefit', 'idx_sent_reminders'):
+        try:
+            db.execute(f'DROP INDEX IF EXISTS {legacy}')
+        except Exception:
+            pass
+    db.execute('CREATE INDEX IF NOT EXISTS idx_redemptions_lookup ON redemptions(user_card_id, benefit_id, period_start)')
+    db.execute('CREATE INDEX IF NOT EXISTS idx_reminders_benefit  ON reminders(user_card_id, benefit_id)')
+    db.execute('CREATE INDEX IF NOT EXISTS idx_sent_reminders     ON sent_reminders(user_card_id, benefit_id, period_start)')
     db.commit()
 
 
@@ -285,6 +300,190 @@ def _populate_user_cards_for_admin(db, admin_id):
     db.commit()
 
 
+def _migrate_to_per_user_card(db):
+    """Phase 10: thread user_card_id through every per-instance table
+    (redemptions, reminders, sent_reminders, user_benefits,
+    card_share_members), drop UNIQUE(user_id, card_id) on user_cards,
+    and add user_cards.nickname. Idempotent — detects completion by
+    looking for user_card_id on user_benefits."""
+    ub_cols = {r[1] for r in db.execute('PRAGMA table_info(user_benefits)').fetchall()}
+    if 'user_card_id' in ub_cols:
+        return
+
+    db.commit()
+    db.execute('PRAGMA foreign_keys = OFF')
+    try:
+        # === redemptions ===
+        db.execute('ALTER TABLE redemptions ADD COLUMN user_card_id INTEGER')
+        db.execute('''
+            UPDATE redemptions SET user_card_id = (
+                SELECT uc.id FROM user_cards uc
+                JOIN benefits b ON b.card_id = uc.card_id
+                WHERE uc.user_id = redemptions.user_id AND b.id = redemptions.benefit_id
+            )
+        ''')
+        db.execute('''
+            CREATE TABLE redemptions_new (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_card_id INTEGER NOT NULL,
+                benefit_id   INTEGER NOT NULL,
+                period_start DATE    NOT NULL,
+                amount       REAL,
+                notes        TEXT,
+                redeemed_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_card_id) REFERENCES user_cards(id) ON DELETE CASCADE,
+                FOREIGN KEY (benefit_id)   REFERENCES benefits(id)   ON DELETE CASCADE
+            )
+        ''')
+        db.execute('''
+            INSERT INTO redemptions_new (id, user_card_id, benefit_id, period_start, amount, notes, redeemed_at)
+            SELECT id, user_card_id, benefit_id, period_start, amount, notes, redeemed_at FROM redemptions
+            WHERE user_card_id IS NOT NULL
+        ''')
+        db.execute('DROP TABLE redemptions')
+        db.execute('ALTER TABLE redemptions_new RENAME TO redemptions')
+
+        # === reminders ===
+        db.execute('ALTER TABLE reminders ADD COLUMN user_card_id INTEGER')
+        db.execute('''
+            UPDATE reminders SET user_card_id = (
+                SELECT uc.id FROM user_cards uc
+                JOIN benefits b ON b.card_id = uc.card_id
+                WHERE uc.user_id = reminders.user_id AND b.id = reminders.benefit_id
+            )
+        ''')
+        db.execute('''
+            CREATE TABLE reminders_new (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_card_id INTEGER NOT NULL,
+                benefit_id   INTEGER NOT NULL,
+                days_before  INTEGER NOT NULL,
+                UNIQUE(user_card_id, benefit_id, days_before),
+                FOREIGN KEY (user_card_id) REFERENCES user_cards(id) ON DELETE CASCADE,
+                FOREIGN KEY (benefit_id)   REFERENCES benefits(id)   ON DELETE CASCADE
+            )
+        ''')
+        db.execute('''
+            INSERT INTO reminders_new (id, user_card_id, benefit_id, days_before)
+            SELECT id, user_card_id, benefit_id, days_before FROM reminders
+            WHERE user_card_id IS NOT NULL
+        ''')
+        db.execute('DROP TABLE reminders')
+        db.execute('ALTER TABLE reminders_new RENAME TO reminders')
+
+        # === sent_reminders ===
+        db.execute('ALTER TABLE sent_reminders ADD COLUMN user_card_id INTEGER')
+        db.execute('''
+            UPDATE sent_reminders SET user_card_id = (
+                SELECT uc.id FROM user_cards uc
+                JOIN benefits b ON b.card_id = uc.card_id
+                WHERE uc.user_id = sent_reminders.user_id AND b.id = sent_reminders.benefit_id
+            )
+        ''')
+        db.execute('''
+            CREATE TABLE sent_reminders_new (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_card_id INTEGER NOT NULL,
+                benefit_id   INTEGER NOT NULL,
+                period_start DATE    NOT NULL,
+                days_before  INTEGER NOT NULL,
+                sent_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(user_card_id, benefit_id, period_start, days_before),
+                FOREIGN KEY (user_card_id) REFERENCES user_cards(id) ON DELETE CASCADE,
+                FOREIGN KEY (benefit_id)   REFERENCES benefits(id)   ON DELETE CASCADE
+            )
+        ''')
+        db.execute('''
+            INSERT INTO sent_reminders_new (id, user_card_id, benefit_id, period_start, days_before, sent_at)
+            SELECT id, user_card_id, benefit_id, period_start, days_before, sent_at FROM sent_reminders
+            WHERE user_card_id IS NOT NULL
+        ''')
+        db.execute('DROP TABLE sent_reminders')
+        db.execute('ALTER TABLE sent_reminders_new RENAME TO sent_reminders')
+
+        # === user_benefits ===
+        db.execute('ALTER TABLE user_benefits ADD COLUMN user_card_id INTEGER')
+        db.execute('''
+            UPDATE user_benefits SET user_card_id = (
+                SELECT uc.id FROM user_cards uc
+                JOIN benefits b ON b.card_id = uc.card_id
+                WHERE uc.user_id = user_benefits.user_id AND b.id = user_benefits.benefit_id
+            )
+        ''')
+        db.execute('''
+            CREATE TABLE user_benefits_new (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_card_id INTEGER NOT NULL,
+                benefit_id   INTEGER NOT NULL,
+                active       INTEGER NOT NULL DEFAULT 1,
+                UNIQUE(user_card_id, benefit_id),
+                FOREIGN KEY (user_card_id) REFERENCES user_cards(id) ON DELETE CASCADE,
+                FOREIGN KEY (benefit_id)   REFERENCES benefits(id)   ON DELETE CASCADE
+            )
+        ''')
+        db.execute('''
+            INSERT INTO user_benefits_new (id, user_card_id, benefit_id, active)
+            SELECT id, user_card_id, benefit_id, active FROM user_benefits
+            WHERE user_card_id IS NOT NULL
+        ''')
+        db.execute('DROP TABLE user_benefits')
+        db.execute('ALTER TABLE user_benefits_new RENAME TO user_benefits')
+
+        # === card_share_members ===
+        db.execute('ALTER TABLE card_share_members ADD COLUMN user_card_id INTEGER')
+        db.execute('''
+            UPDATE card_share_members SET user_card_id = (
+                SELECT uc.id FROM user_cards uc
+                JOIN card_share_groups csg ON csg.card_id = uc.card_id
+                WHERE uc.user_id = card_share_members.user_id
+                  AND csg.id    = card_share_members.group_id
+            )
+        ''')
+        db.execute('''
+            CREATE TABLE card_share_members_new (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                group_id     INTEGER NOT NULL,
+                user_card_id INTEGER NOT NULL,
+                joined_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(group_id, user_card_id),
+                FOREIGN KEY (group_id)     REFERENCES card_share_groups(id) ON DELETE CASCADE,
+                FOREIGN KEY (user_card_id) REFERENCES user_cards(id)        ON DELETE CASCADE
+            )
+        ''')
+        db.execute('''
+            INSERT INTO card_share_members_new (id, group_id, user_card_id, joined_at)
+            SELECT id, group_id, user_card_id, joined_at FROM card_share_members
+            WHERE user_card_id IS NOT NULL
+        ''')
+        db.execute('DROP TABLE card_share_members')
+        db.execute('ALTER TABLE card_share_members_new RENAME TO card_share_members')
+
+        # === user_cards: drop UNIQUE(user_id, card_id), add nickname ===
+        db.execute('''
+            CREATE TABLE user_cards_new (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id         INTEGER NOT NULL,
+                card_id         INTEGER NOT NULL,
+                active          INTEGER NOT NULL DEFAULT 1,
+                share_group_id  INTEGER,
+                nickname        TEXT,
+                assigned_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id)        REFERENCES users(id)             ON DELETE CASCADE,
+                FOREIGN KEY (card_id)        REFERENCES cards(id)             ON DELETE CASCADE,
+                FOREIGN KEY (share_group_id) REFERENCES card_share_groups(id) ON DELETE SET NULL
+            )
+        ''')
+        db.execute('''
+            INSERT INTO user_cards_new (id, user_id, card_id, active, share_group_id, assigned_at)
+            SELECT id, user_id, card_id, active, share_group_id, assigned_at FROM user_cards
+        ''')
+        db.execute('DROP TABLE user_cards')
+        db.execute('ALTER TABLE user_cards_new RENAME TO user_cards')
+        db.commit()
+    finally:
+        db.execute('PRAGMA foreign_keys = ON')
+
+
 def _migrate_credentials_file_to_users(db):
     """One-time backfill: if a legacy .credentials file exists and no admin
     user is in the users table yet, insert an admin row using the file's
@@ -392,32 +591,27 @@ def set_setting(db, key, value):
     db.execute('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)', (key, value))
 
 
-def effective_user_ids_for_card(db, card_id, viewer_id):
-    """Return the list of user_ids whose redemptions pool together for this card,
-    from the viewer's perspective. Solo card → [viewer_id]. Shared card →
-    every share group member's user_id.
-
-    The viewer is expected to have a user_cards row for the card; if they
-    don't (e.g., admin viewing a benefit they don't personally own), the
-    function falls back to [viewer_id] so existing solo-scoped behavior holds.
-    """
+def effective_user_card_ids(db, user_card_id):
+    """Return the list of user_cards.id whose redemptions pool together with
+    this one. Solo → [user_card_id]. Shared → every share-group member's
+    user_cards.id."""
     row = db.execute(
-        'SELECT share_group_id FROM user_cards WHERE user_id = ? AND card_id = ?',
-        (viewer_id, card_id)
+        'SELECT share_group_id FROM user_cards WHERE id = ?',
+        (user_card_id,)
     ).fetchone()
     if not row or row['share_group_id'] is None:
-        return [viewer_id]
-    members = [r['user_id'] for r in db.execute(
-        'SELECT user_id FROM card_share_members WHERE group_id = ?',
+        return [user_card_id]
+    members = [r['user_card_id'] for r in db.execute(
+        'SELECT user_card_id FROM card_share_members WHERE group_id = ?',
         (row['share_group_id'],)
     ).fetchall()]
-    return members or [viewer_id]
+    return members or [user_card_id]
 
 
-def enrich_benefit(db, benefit, user_id):
-    """Add period info and usage totals to a benefit row dict, scoped to one
-    user. Redemption sums pool across share-group members when the card is
-    shared; reminder days remain strictly per-user."""
+def enrich_benefit(db, benefit, user_card_id):
+    """Add period info and usage totals to a benefit row dict, scoped to a
+    single user_cards instance. Redemption sums pool across share-group
+    members when the instance is shared; reminder days remain per-instance."""
     b = dict(benefit)
     period_start, period_end = get_current_period(b['period_type'])
     b['period_start'] = period_start
@@ -425,12 +619,12 @@ def enrich_benefit(db, benefit, user_id):
     b['days_left']    = days_left(period_end)
     b['period_label'] = PERIOD_LABELS[b['period_type']]
 
-    pool = effective_user_ids_for_card(db, b['card_id'], user_id)
+    pool = effective_user_card_ids(db, user_card_id)
     placeholders = ','.join('?' * len(pool))
 
     rows = db.execute(
         f'SELECT COALESCE(SUM(amount), 0) AS total FROM redemptions '
-        f'WHERE user_id IN ({placeholders}) AND benefit_id = ? AND period_start = ?',
+        f'WHERE user_card_id IN ({placeholders}) AND benefit_id = ? AND period_start = ?',
         (*pool, b['id'], str(period_start))
     ).fetchone()
     b['amount_used'] = rows['total']
@@ -442,7 +636,7 @@ def enrich_benefit(db, benefit, user_id):
     else:
         count = db.execute(
             f'SELECT COUNT(*) FROM redemptions '
-            f'WHERE user_id IN ({placeholders}) AND benefit_id = ? AND period_start = ?',
+            f'WHERE user_card_id IN ({placeholders}) AND benefit_id = ? AND period_start = ?',
             (*pool, b['id'], str(period_start))
         ).fetchone()[0]
         b['remaining']  = 0 if count > 0 else 1
@@ -450,8 +644,9 @@ def enrich_benefit(db, benefit, user_id):
         b['fully_used'] = count > 0
 
     reminders = db.execute(
-        'SELECT days_before FROM reminders WHERE user_id = ? AND benefit_id = ? ORDER BY days_before DESC',
-        (user_id, b['id'])
+        'SELECT days_before FROM reminders WHERE user_card_id = ? AND benefit_id = ? '
+        'ORDER BY days_before DESC',
+        (user_card_id, b['id'])
     ).fetchall()
     b['reminder_days'] = [r['days_before'] for r in reminders]
 
@@ -461,23 +656,23 @@ def enrich_benefit(db, benefit, user_id):
 _PERIODS_PER_YEAR = {'monthly': 12, 'quarterly': 4, 'semi-annual': 2, 'annual': 1}
 
 
-def compute_card_roi(db, enriched_benefits, user_id):
-    """Return (captured, max_possible) for a card's benefits this calendar year.
-    Captured pools across share-group members when the card is shared."""
+def compute_card_roi(db, enriched_benefits, user_card_id):
+    """Return (captured, max_possible) for a user_cards instance's benefits
+    this calendar year. Captured pools across share-group members."""
     year = str(date.today().year)
     captured = 0.0
     max_possible = 0.0
+    pool = effective_user_card_ids(db, user_card_id)
+    placeholders = ','.join('?' * len(pool))
     for b in enriched_benefits:
         if not b.get('credit_amount'):
             continue
         ca = b['credit_amount']
         ppy = _PERIODS_PER_YEAR.get(b['period_type'], 1)
         max_possible += ca * ppy
-        pool = effective_user_ids_for_card(db, b['card_id'], user_id)
-        placeholders = ','.join('?' * len(pool))
         row = db.execute(
             f"SELECT COALESCE(SUM(amount), 0) AS total FROM redemptions "
-            f"WHERE user_id IN ({placeholders}) AND benefit_id = ? AND strftime('%Y', period_start) = ?",
+            f"WHERE user_card_id IN ({placeholders}) AND benefit_id = ? AND strftime('%Y', period_start) = ?",
             (*pool, b['id'], year)
         ).fetchone()
         captured += row['total']
@@ -918,44 +1113,52 @@ def reset_password(token):
 def dashboard():
     db = get_db()
     uid = g.user['id']
-    cards = db.execute('''
-        SELECT c.* FROM cards c
-        JOIN user_cards uc ON uc.card_id = c.id
+    user_cards = db.execute('''
+        SELECT uc.id           AS user_card_id,
+               uc.nickname     AS nickname,
+               uc.share_group_id,
+               c.id            AS card_id,
+               c.name          AS card_name,
+               c.annual_fee    AS annual_fee,
+               c.active        AS card_active,
+               c.published     AS card_published
+        FROM user_cards uc
+        JOIN cards c ON c.id = uc.card_id
         WHERE uc.user_id = ? AND uc.active = 1 AND c.active = 1
-        ORDER BY c.name
+        ORDER BY c.name, uc.id
     ''', (uid,)).fetchall()
 
     dashboard_cards = []
     total_benefits = 0
     total_used = 0
 
-    for card in cards:
+    for ucr in user_cards:
+        card_id = ucr['card_id']
+        uc_id   = ucr['user_card_id']
         raw_benefits = db.execute('''
             SELECT b.* FROM benefits b
-            LEFT JOIN user_benefits ub ON ub.benefit_id = b.id AND ub.user_id = ?
+            LEFT JOIN user_benefits ub ON ub.benefit_id = b.id AND ub.user_card_id = ?
             WHERE b.card_id = ? AND b.active = 1 AND COALESCE(ub.active, 1) = 1
             ORDER BY b.name
-        ''', (uid, card['id'])).fetchall()
-        enriched = [enrich_benefit(db, b, uid) for b in raw_benefits]
+        ''', (uc_id, card_id)).fetchall()
+        enriched = [enrich_benefit(db, b, uc_id) for b in raw_benefits]
         enriched.sort(key=lambda b: (1 if b['fully_used'] else 0, b['days_left']))
         total_benefits += len(enriched)
         total_used += sum(1 for b in enriched if b['fully_used'])
 
-        # Split set-aside benefits into two distinct lists: catalog-archived
-        # (admin marked inactive) vs. user-not-pursuing (per-user opt-out).
         archived = db.execute(
             'SELECT * FROM benefits WHERE card_id = ? AND active = 0 ORDER BY name',
-            (card['id'],)
+            (card_id,)
         ).fetchall()
         not_pursuing = db.execute('''
             SELECT b.* FROM benefits b
-            JOIN user_benefits ub ON ub.benefit_id = b.id AND ub.user_id = ?
+            JOIN user_benefits ub ON ub.benefit_id = b.id AND ub.user_card_id = ?
             WHERE b.card_id = ? AND b.active = 1 AND ub.active = 0
             ORDER BY b.name
-        ''', (uid, card['id'])).fetchall()
+        ''', (uc_id, card_id)).fetchall()
 
-        captured, max_possible = compute_card_roi(db, enriched, uid)
-        annual_fee = card['annual_fee'] or 0
+        captured, max_possible = compute_card_roi(db, enriched, uc_id)
+        annual_fee = ucr['annual_fee'] or 0
         roi = {
             'captured':      captured,
             'max_possible':  max_possible,
@@ -963,10 +1166,24 @@ def dashboard():
             'max_pct':       min(100, int(captured / max_possible * 100)) if max_possible > 0 else 0,
             'fee_tick_pct':  min(100, int(annual_fee / max_possible * 100)) if (annual_fee > 0 and max_possible > 0) else None,
         }
-        dashboard_cards.append({'card': dict(card), 'benefits': enriched,
-                                'archived':     [dict(b) for b in archived],
-                                'not_pursuing': [dict(b) for b in not_pursuing],
-                                'roi': roi})
+        # Render-friendly card dict: catalog id + name + fee, plus per-instance nickname
+        card_view = {
+            'id':         card_id,
+            'name':       ucr['card_name'],
+            'annual_fee': ucr['annual_fee'],
+            'active':     ucr['card_active'],
+            'published':  ucr['card_published'],
+        }
+        dashboard_cards.append({
+            'user_card_id':   uc_id,
+            'card':           card_view,
+            'nickname':       ucr['nickname'],
+            'display_name':   ucr['nickname'] or ucr['card_name'],
+            'benefits':       enriched,
+            'archived':       [dict(b) for b in archived],
+            'not_pursuing':   [dict(b) for b in not_pursuing],
+            'roi':            roi,
+        })
 
     total_captured = sum(dc['roi']['captured'] for dc in dashboard_cards)
     total_fees     = sum(dc['card']['annual_fee'] or 0 for dc in dashboard_cards)
@@ -991,16 +1208,15 @@ def dashboard():
 @app.route('/card-templates')
 @login_required
 def card_templates():
+    """The 'Add a Card' page. Lists published, active catalog cards and how many
+    instances the current user already has of each (multi-instance friendly)."""
     db = get_db()
     rows = db.execute('''
         SELECT c.id, c.name, c.annual_fee, c.active,
-               COUNT(b.id) AS benefit_count,
-               uc.active   AS user_active
+               (SELECT COUNT(*) FROM benefits b WHERE b.card_id = c.id AND b.active = 1) AS benefit_count,
+               (SELECT COUNT(*) FROM user_cards uc WHERE uc.card_id = c.id AND uc.user_id = ? AND uc.active = 1) AS my_count
         FROM cards c
-        LEFT JOIN benefits b   ON b.card_id  = c.id AND b.active = 1
-        LEFT JOIN user_cards uc ON uc.card_id = c.id AND uc.user_id = ?
         WHERE c.published = 1 AND c.active = 1
-        GROUP BY c.id
         ORDER BY c.name
     ''', (g.user['id'],)).fetchall()
     db.close()
@@ -1010,6 +1226,9 @@ def card_templates():
 @app.route('/card-templates/<int:card_id>/add', methods=['POST'])
 @login_required
 def card_templates_add(card_id):
+    """Add a new instance of this catalog card to the current user's dashboard.
+    Multi-instance: each call creates a brand-new user_cards row, so a user can
+    hold several of the same card with independent tracking."""
     db   = get_db()
     uid  = g.user['id']
     card = db.execute(
@@ -1019,27 +1238,23 @@ def card_templates_add(card_id):
         db.close()
         flash('That card is not available in the templates.', 'danger')
         return redirect(url_for('card_templates'))
-    existing = db.execute(
-        'SELECT id, active FROM user_cards WHERE user_id = ? AND card_id = ?',
-        (uid, card_id)
-    ).fetchone()
-    if existing:
-        db.execute('UPDATE user_cards SET active = 1 WHERE id = ?', (existing['id'],))
-    else:
-        db.execute(
-            'INSERT INTO user_cards (user_id, card_id, active) VALUES (?, ?, 1)',
-            (uid, card_id))
+    nickname = request.form.get('nickname', '').strip() or None
+    cur = db.execute(
+        'INSERT INTO user_cards (user_id, card_id, active, nickname) VALUES (?, ?, 1, ?)',
+        (uid, card_id, nickname))
+    new_uc_id = cur.lastrowid
     db.commit()
     db.close()
-    flash(f'"{card["name"]}" added to your dashboard.', 'success')
-    return redirect(url_for('dashboard'))
+    label = nickname or card['name']
+    flash(f'Added "{label}" to your dashboard.', 'success')
+    return redirect(url_for('card_detail', id=new_uc_id))
 
 
 @app.route('/cards/<int:id>/share', methods=['POST'])
 @login_required
 def card_share(id):
-    """Invite an existing user to pool redemptions on a card the current
-    user already has on their dashboard."""
+    """Invite an existing user to share THIS user_cards instance (id =
+    user_card_id) so they pool redemptions on the same physical card."""
     db        = get_db()
     uid       = g.user['id']
     inviter   = g.user
@@ -1050,8 +1265,8 @@ def card_share(id):
         return redirect(url_for('card_detail', id=id))
 
     my_uc = db.execute(
-        'SELECT id, share_group_id FROM user_cards WHERE user_id = ? AND card_id = ?',
-        (uid, id)).fetchone()
+        'SELECT id, card_id, share_group_id FROM user_cards WHERE id = ? AND user_id = ?',
+        (id, uid)).fetchone()
     if not my_uc:
         db.close()
         flash('You can only share a card that is on your own dashboard.', 'danger')
@@ -1067,19 +1282,25 @@ def card_share(id):
         flash("You can't share a card with yourself.", 'danger')
         return redirect(url_for('card_detail', id=id))
 
-    # If invitee already shares this card with the current user, no-op
+    # If THIS instance is already shared and invitee is a member, no-op
     if my_uc['share_group_id'] is not None:
-        already = db.execute(
-            'SELECT 1 FROM card_share_members WHERE group_id = ? AND user_id = ?',
-            (my_uc['share_group_id'], invitee['id'])).fetchone()
+        already = db.execute('''
+            SELECT 1 FROM card_share_members csm
+            JOIN user_cards uc ON uc.id = csm.user_card_id
+            WHERE csm.group_id = ? AND uc.user_id = ?
+        ''', (my_uc['share_group_id'], invitee['id'])).fetchone()
         if already:
             db.close()
             flash(f'{invitee["email"]} already shares this card with you.', 'info')
             return redirect(url_for('card_detail', id=id))
 
-    card = db.execute('SELECT id, name FROM cards WHERE id = ?', (id,)).fetchone()
+    card = db.execute('SELECT id, name FROM cards WHERE id = ?', (my_uc['card_id'],)).fetchone()
     raw_token = _create_token(db, invitee['id'], purpose='share',
-                              inviter_user_id=uid, card_id=id)
+                              inviter_user_id=uid, card_id=my_uc['card_id'])
+    # Tag the specific instance being shared
+    db.execute('UPDATE invitations SET inviter_user_card_id = ? '
+               "WHERE token_hash = ?",
+               (id, _hash_invite_token(raw_token)))
     db.commit()
 
     gmail_user = get_setting(db, 'gmail_user')
@@ -1117,7 +1338,7 @@ def accept_share(token):
 
     # Load context for display + action
     extra = db.execute('''
-        SELECT i.card_id, i.inviter_user_id,
+        SELECT i.card_id, i.inviter_user_id, i.inviter_user_card_id,
                c.name AS card_name,
                u.email AS inviter_email
         FROM invitations i
@@ -1146,11 +1367,19 @@ def accept_share(token):
         card_id     = extra['card_id']
         inviter_id  = extra['inviter_user_id']
         invitee_id  = inv['user_id']
+        inviter_uc_id = extra['inviter_user_card_id']
 
-        # Find the inviter's user_cards row — they must have the card.
-        inviter_uc = db.execute(
-            'SELECT id, share_group_id FROM user_cards WHERE user_id = ? AND card_id = ?',
-            (inviter_id, card_id)).fetchone()
+        # Resolve the specific inviter user_cards row being shared
+        if inviter_uc_id:
+            inviter_uc = db.execute(
+                'SELECT id, share_group_id FROM user_cards WHERE id = ? AND user_id = ?',
+                (inviter_uc_id, inviter_id)).fetchone()
+        else:
+            # Legacy invite without an instance pointer — fall back to any row
+            inviter_uc = db.execute(
+                'SELECT id, share_group_id FROM user_cards WHERE user_id = ? AND card_id = ? '
+                'ORDER BY id LIMIT 1',
+                (inviter_id, card_id)).fetchone()
         if not inviter_uc:
             db.close()
             flash("The inviter no longer has this card. Ask them to share again.", 'danger')
@@ -1163,32 +1392,23 @@ def accept_share(token):
             cur = db.execute('INSERT INTO card_share_groups (card_id) VALUES (?)', (card_id,))
             group_id = cur.lastrowid
             db.execute(
-                'INSERT OR IGNORE INTO card_share_members (group_id, user_id) VALUES (?, ?)',
-                (group_id, inviter_id))
+                'INSERT OR IGNORE INTO card_share_members (group_id, user_card_id) VALUES (?, ?)',
+                (group_id, inviter_uc['id']))
             db.execute(
                 'UPDATE user_cards SET share_group_id = ? WHERE id = ?',
                 (group_id, inviter_uc['id']))
 
-        # Make sure the invitee has a user_cards row pointing at this group
-        invitee_uc = db.execute(
-            'SELECT id, share_group_id FROM user_cards WHERE user_id = ? AND card_id = ?',
-            (invitee_id, card_id)).fetchone()
-        if invitee_uc:
-            if invitee_uc['share_group_id'] not in (None, group_id):
-                db.close()
-                flash("You're already in a different share for this card. Leave that one first, then re-accept.", 'danger')
-                return redirect(url_for('dashboard'))
-            db.execute(
-                'UPDATE user_cards SET share_group_id = ?, active = 1 WHERE id = ?',
-                (group_id, invitee_uc['id']))
-        else:
-            db.execute(
-                'INSERT INTO user_cards (user_id, card_id, active, share_group_id) VALUES (?, ?, 1, ?)',
-                (invitee_id, card_id, group_id))
+        # The invitee always gets a FRESH user_cards instance dedicated to this
+        # share — multi-instance world, so we don't risk fighting over an
+        # existing solo instance the invitee already has.
+        cur = db.execute(
+            'INSERT INTO user_cards (user_id, card_id, active, share_group_id) VALUES (?, ?, 1, ?)',
+            (invitee_id, card_id, group_id))
+        invitee_uc_id = cur.lastrowid
 
         db.execute(
-            'INSERT OR IGNORE INTO card_share_members (group_id, user_id) VALUES (?, ?)',
-            (group_id, invitee_id))
+            'INSERT OR IGNORE INTO card_share_members (group_id, user_card_id) VALUES (?, ?)',
+            (group_id, invitee_uc_id))
         db.execute('UPDATE invitations SET used_at = ? WHERE id = ?',
                    (_now_utc().isoformat(timespec='seconds'), inv['invite_id']))
         db.commit()
@@ -1204,17 +1424,39 @@ def accept_share(token):
                             token=token)
 
 
+@app.route('/cards/<int:id>/rename', methods=['POST'])
+@login_required
+def user_card_rename(id):
+    """Set or clear the nickname on a user_cards instance the current user owns."""
+    nickname = request.form.get('nickname', '').strip() or None
+    db = get_db()
+    row = db.execute(
+        'SELECT id FROM user_cards WHERE id = ? AND user_id = ?',
+        (id, g.user['id'])).fetchone()
+    if not row:
+        db.close()
+        flash('Card not found.', 'danger')
+        return redirect(url_for('cards_list'))
+    db.execute('UPDATE user_cards SET nickname = ? WHERE id = ?', (nickname, id))
+    db.commit()
+    db.close()
+    flash('Card renamed.', 'success')
+    return redirect(url_for('card_detail', id=id))
+
+
 @app.route('/cards/<int:id>/remove', methods=['POST'])
 @login_required
 def card_remove(id):
-    """Soft-remove the card from the current user's dashboard. Redemption
-    history stays in the db so re-adding restores everything."""
-    db = get_db()
-    row = db.execute(
-        'SELECT uc.id, c.name FROM user_cards uc JOIN cards c ON c.id = uc.card_id '
-        'WHERE uc.user_id = ? AND uc.card_id = ?',
-        (g.user['id'], id)
-    ).fetchone()
+    """Soft-remove this card instance from the current user's dashboard.
+    id is a user_cards row id. Redemption history is preserved; re-adding
+    is via Card Templates (which creates a fresh instance)."""
+    db  = get_db()
+    row = db.execute('''
+        SELECT uc.id, COALESCE(uc.nickname, c.name) AS label
+        FROM user_cards uc
+        JOIN cards c ON c.id = uc.card_id
+        WHERE uc.id = ? AND uc.user_id = ?
+    ''', (id, g.user['id'])).fetchone()
     if not row:
         db.close()
         flash('Card not found on your dashboard.', 'danger')
@@ -1222,22 +1464,40 @@ def card_remove(id):
     db.execute('UPDATE user_cards SET active = 0 WHERE id = ?', (row['id'],))
     db.commit()
     db.close()
-    flash(f'"{row["name"]}" removed from your dashboard. Re-add anytime from Card Templates.', 'success')
+    flash(f'"{row["label"]}" removed from your dashboard.', 'success')
     return redirect(url_for('cards_list'))
 
 
 @app.route('/cards')
 @login_required
 def cards_list():
-    db = get_db()
-    cards = db.execute('''
-        SELECT c.*, COUNT(b.id) AS benefit_count
-        FROM cards c
-        JOIN user_cards uc ON uc.card_id = c.id AND uc.user_id = ?
+    """List all of the current user's card instances (multi-instance friendly:
+    two of the same catalog card show as two rows)."""
+    db    = get_db()
+    rows  = db.execute('''
+        SELECT uc.id          AS user_card_id,
+               uc.nickname    AS nickname,
+               uc.active      AS uc_active,
+               c.id           AS card_id,
+               c.name         AS card_name,
+               c.active       AS card_active,
+               COUNT(b.id)    AS benefit_count
+        FROM user_cards uc
+        JOIN cards c ON c.id = uc.card_id
         LEFT JOIN benefits b ON b.card_id = c.id AND b.active = 1
-        GROUP BY c.id
-        ORDER BY c.active DESC, c.name
+        WHERE uc.user_id = ?
+        GROUP BY uc.id
+        ORDER BY uc.active DESC, c.active DESC, c.name, uc.id
     ''', (g.user['id'],)).fetchall()
+    cards = [{
+        'id':            r['user_card_id'],
+        'card_id':       r['card_id'],
+        'name':          r['nickname'] or r['card_name'],
+        'card_name':     r['card_name'],
+        'nickname':      r['nickname'],
+        'active':        r['uc_active'] and r['card_active'],
+        'benefit_count': r['benefit_count'],
+    } for r in rows]
     db.close()
     return render_template('cards/list.html', cards=cards)
 
@@ -1262,35 +1522,96 @@ def card_new():
             'INSERT INTO cards (name, annual_fee, published) VALUES (?, ?, ?)',
             (name, annual_fee, published))
         cid = cur.lastrowid
-        db.execute(
+        cur = db.execute(
             'INSERT INTO user_cards (user_id, card_id, active) VALUES (?, ?, 1)',
             (g.user['id'], cid))
+        new_uc_id = cur.lastrowid
         db.commit()
         db.close()
         flash(f'Card "{name}" added.', 'success')
-        return redirect(url_for('card_detail', id=cid))
+        return redirect(url_for('card_detail', id=new_uc_id))
     return render_template('cards/form.html', form={})
 
 
-@app.route('/cards/<int:id>', methods=['GET', 'POST'])
+@app.route('/cards/<int:id>', methods=['GET'])
 @login_required
 def card_detail(id):
-    db   = get_db()
-    card = db.execute('''
-        SELECT c.* FROM cards c
-        JOIN user_cards uc ON uc.card_id = c.id
-        WHERE c.id = ? AND uc.user_id = ?
-    ''', (id, g.user['id'])).fetchone()
-    if not card:
+    """Render a single user_cards instance: its nickname, the underlying
+    catalog card, and per-instance benefit usage."""
+    db  = get_db()
+    uid = g.user['id']
+    row = db.execute('''
+        SELECT uc.id            AS user_card_id,
+               uc.card_id       AS card_id,
+               uc.nickname      AS nickname,
+               uc.share_group_id,
+               uc.active        AS uc_active,
+               c.name           AS card_name,
+               c.annual_fee     AS annual_fee,
+               c.active         AS card_active,
+               c.published      AS published
+        FROM user_cards uc
+        JOIN cards c ON c.id = uc.card_id
+        WHERE uc.id = ? AND uc.user_id = ?
+    ''', (id, uid)).fetchone()
+    if not row:
         db.close()
         flash('Card not found.', 'danger')
         return redirect(url_for('cards_list'))
 
+    raw_benefits = db.execute('''
+        SELECT b.*, COALESCE(ub.active, 1) AS user_active
+        FROM benefits b
+        LEFT JOIN user_benefits ub ON ub.benefit_id = b.id AND ub.user_card_id = ?
+        WHERE b.card_id = ?
+        ORDER BY b.active DESC, b.name
+    ''', (id, row['card_id'])).fetchall()
+    benefits = []
+    for b in raw_benefits:
+        eb = enrich_benefit(db, b, id)
+        eb['user_active'] = b['user_active']
+        benefits.append(eb)
+
+    # Other share members (besides the viewer) for display
+    share_members = []
+    if row['share_group_id'] is not None:
+        share_members = [dict(r) for r in db.execute('''
+            SELECT u.email, uc.nickname
+            FROM card_share_members csm
+            JOIN user_cards uc ON uc.id = csm.user_card_id
+            JOIN users u ON u.id = uc.user_id
+            WHERE csm.group_id = ? AND uc.id != ?
+        ''', (row['share_group_id'], id)).fetchall()]
+
+    card = {
+        'id':             row['card_id'],
+        'user_card_id':   row['user_card_id'],
+        'name':           row['card_name'],
+        'annual_fee':     row['annual_fee'],
+        'active':         row['card_active'],
+        'published':      row['published'],
+        'nickname':       row['nickname'],
+        'display_name':   row['nickname'] or row['card_name'],
+        'share_group_id': row['share_group_id'],
+    }
+    db.close()
+    return render_template('cards/detail.html', card=card, benefits=benefits,
+                            share_members=share_members)
+
+
+# ── Admin catalog routes (operate on cards.id, not user_cards.id) ─────────
+
+@app.route('/admin-cards/<int:card_id>', methods=['GET', 'POST'])
+@admin_required
+def catalog_card_edit(card_id):
+    db   = get_db()
+    card = db.execute('SELECT * FROM cards WHERE id = ?', (card_id,)).fetchone()
+    if not card:
+        db.close()
+        flash('Card not found.', 'danger')
+        return redirect(url_for('card_templates'))
+
     if request.method == 'POST':
-        if not g.user['is_admin']:
-            db.close()
-            flash('Admin access required.', 'danger')
-            return redirect(url_for('card_detail', id=id))
         name        = request.form.get('name', '').strip()
         active      = 1 if request.form.get('active') else 0
         published   = 1 if request.form.get('published') else 0
@@ -1305,44 +1626,40 @@ def card_detail(id):
         else:
             db.execute(
                 'UPDATE cards SET name=?, active=?, annual_fee=?, published=? WHERE id=?',
-                (name, active, annual_fee, published, id))
+                (name, active, annual_fee, published, card_id))
             db.commit()
             flash('Card updated.', 'success')
         db.close()
-        return redirect(url_for('card_detail', id=id))
+        return redirect(url_for('catalog_card_edit', card_id=card_id))
 
-    raw_benefits = db.execute('''
-        SELECT b.*, COALESCE(ub.active, 1) AS user_active
-        FROM benefits b
-        LEFT JOIN user_benefits ub ON ub.benefit_id = b.id AND ub.user_id = ?
-        WHERE b.card_id = ?
-        ORDER BY b.active DESC, b.name
-    ''', (g.user['id'], id)).fetchall()
-    benefits = []
-    for b in raw_benefits:
-        eb = enrich_benefit(db, b, g.user['id'])
-        eb['user_active'] = b['user_active']
-        benefits.append(eb)
+    benefits = db.execute(
+        'SELECT * FROM benefits WHERE card_id = ? ORDER BY active DESC, name',
+        (card_id,)
+    ).fetchall()
+    n_instances = db.execute(
+        'SELECT COUNT(*) FROM user_cards WHERE card_id = ?', (card_id,)
+    ).fetchone()[0]
     db.close()
-    return render_template('cards/detail.html', card=card, benefits=benefits)
+    return render_template('admin_catalog_card.html', card=card,
+                            benefits=benefits, n_instances=n_instances)
 
 
-@app.route('/cards/<int:id>/delete', methods=['POST'])
+@app.route('/admin-cards/<int:card_id>/delete', methods=['POST'])
 @admin_required
-def card_delete(id):
+def catalog_card_delete(card_id):
     db  = get_db()
-    row = db.execute('SELECT name FROM cards WHERE id = ?', (id,)).fetchone()
+    row = db.execute('SELECT name FROM cards WHERE id = ?', (card_id,)).fetchone()
     if row:
-        db.execute('DELETE FROM cards WHERE id = ?', (id,))
+        db.execute('DELETE FROM cards WHERE id = ?', (card_id,))
         db.commit()
-        flash(f'Card "{row["name"]}" deleted.', 'success')
+        flash(f'Catalog card "{row["name"]}" deleted (cascaded to every instance and its data).', 'success')
     db.close()
-    return redirect(url_for('cards_list'))
+    return redirect(url_for('card_templates'))
 
 
 # ── Benefits ───────────────────────────────────────────────────────────────────
 
-@app.route('/cards/<int:card_id>/benefits/new', methods=['GET', 'POST'])
+@app.route('/admin-cards/<int:card_id>/benefits/new', methods=['GET', 'POST'])
 @admin_required
 def benefit_new(card_id):
     db   = get_db()
@@ -1350,7 +1667,7 @@ def benefit_new(card_id):
     if not card:
         db.close()
         flash('Card not found.', 'danger')
-        return redirect(url_for('cards_list'))
+        return redirect(url_for('card_templates'))
 
     if request.method == 'POST':
         name               = request.form.get('name', '').strip()
@@ -1380,30 +1697,32 @@ def benefit_new(card_id):
             'VALUES (?, ?, ?, ?, ?, ?)',
             (card_id, name, description, credit_amount, period_type, is_subscription))
         bid = cur.lastrowid
-        uid = g.user['id']
-
-        for d in reminder_days:
-            try:
-                db.execute(
-                    'INSERT OR IGNORE INTO reminders (user_id, benefit_id, days_before) VALUES (?, ?, ?)',
-                    (uid, bid, int(d)))
-            except ValueError:
-                pass
-
-        # Handle custom reminder day
+        # Admin's per-instance reminder defaults are applied to every user_cards
+        # row admin has for this card (typically just one).
+        my_ucs = [r['id'] for r in db.execute(
+            'SELECT id FROM user_cards WHERE user_id = ? AND card_id = ?',
+            (g.user['id'], card_id)).fetchall()]
         custom_day = request.form.get('custom_reminder_day', '').strip()
-        if custom_day:
-            try:
-                db.execute(
-                    'INSERT OR IGNORE INTO reminders (user_id, benefit_id, days_before) VALUES (?, ?, ?)',
-                    (uid, bid, int(custom_day)))
-            except ValueError:
-                pass
+        for my_uc_id in my_ucs:
+            for d in reminder_days:
+                try:
+                    db.execute(
+                        'INSERT OR IGNORE INTO reminders (user_card_id, benefit_id, days_before) VALUES (?, ?, ?)',
+                        (my_uc_id, bid, int(d)))
+                except ValueError:
+                    pass
+            if custom_day:
+                try:
+                    db.execute(
+                        'INSERT OR IGNORE INTO reminders (user_card_id, benefit_id, days_before) VALUES (?, ?, ?)',
+                        (my_uc_id, bid, int(custom_day)))
+                except ValueError:
+                    pass
 
         db.commit()
         db.close()
         flash(f'Benefit "{name}" added.', 'success')
-        return redirect(url_for('card_detail', id=card_id))
+        return redirect(url_for('catalog_card_edit', card_id=card_id))
 
     db.close()
     return render_template('benefits/form.html', card=card, form={},
@@ -1413,35 +1732,58 @@ def benefit_new(card_id):
 @app.route('/benefits/<int:id>/edit', methods=['GET', 'POST'])
 @login_required
 def benefit_edit(id):
+    """Edit a benefit. Admin path mutates the catalog row (name, amount,
+    etc.) and applies reminders to every user_cards instance they hold for
+    this card. Non-admin path requires ?uc=<user_card_id> and only edits
+    that specific instance's reminders."""
     db  = get_db()
     uid = g.user['id']
-    # Only let the user touch a benefit on a card they actually have
-    b = db.execute('''
-        SELECT b.* FROM benefits b
-        JOIN user_cards uc ON uc.card_id = b.card_id
-        WHERE b.id = ? AND uc.user_id = ?
-    ''', (id, uid)).fetchone()
+    is_admin = bool(g.user['is_admin'])
+
+    # Non-admin needs ?uc to know which instance to scope reminders to.
+    uc_id_raw = request.values.get('uc')
+    target_uc = None
+    if uc_id_raw:
+        try:
+            target_uc = int(uc_id_raw)
+        except ValueError:
+            target_uc = None
+
+    if target_uc:
+        uc_row = db.execute(
+            'SELECT id, card_id FROM user_cards WHERE id = ? AND user_id = ?',
+            (target_uc, uid)).fetchone()
+        if not uc_row:
+            db.close()
+            flash('Card instance not found.', 'danger')
+            return redirect(url_for('dashboard'))
+        b = db.execute(
+            'SELECT * FROM benefits WHERE id = ? AND card_id = ?',
+            (id, uc_row['card_id'])).fetchone()
+    else:
+        # Admin path: benefit must just exist
+        b = db.execute('SELECT * FROM benefits WHERE id = ?', (id,)).fetchone()
     if not b:
         db.close()
         flash('Benefit not found.', 'danger')
         return redirect(url_for('dashboard'))
     card = db.execute('SELECT * FROM cards WHERE id = ?', (b['card_id'],)).fetchone()
-    is_admin = bool(g.user['is_admin'])
 
-    def _save_reminders(reminder_days, custom_day):
-        db.execute('DELETE FROM reminders WHERE user_id = ? AND benefit_id = ?', (uid, id))
+    def _save_reminders(uc_id, reminder_days, custom_day):
+        db.execute('DELETE FROM reminders WHERE user_card_id = ? AND benefit_id = ?',
+                   (uc_id, id))
         for d in reminder_days:
             try:
                 db.execute(
-                    'INSERT OR IGNORE INTO reminders (user_id, benefit_id, days_before) VALUES (?, ?, ?)',
-                    (uid, id, int(d)))
+                    'INSERT OR IGNORE INTO reminders (user_card_id, benefit_id, days_before) VALUES (?, ?, ?)',
+                    (uc_id, id, int(d)))
             except ValueError:
                 pass
         if custom_day:
             try:
                 db.execute(
-                    'INSERT OR IGNORE INTO reminders (user_id, benefit_id, days_before) VALUES (?, ?, ?)',
-                    (uid, id, int(custom_day)))
+                    'INSERT OR IGNORE INTO reminders (user_card_id, benefit_id, days_before) VALUES (?, ?, ?)',
+                    (uc_id, id, int(custom_day)))
             except ValueError:
                 pass
 
@@ -1449,7 +1791,8 @@ def benefit_edit(id):
         reminder_days = request.form.getlist('reminder_days')
         custom_day    = request.form.get('custom_reminder_day', '').strip()
 
-        if is_admin:
+        if is_admin and not target_uc:
+            # Admin catalog edit path
             name            = request.form.get('name', '').strip()
             description     = request.form.get('description', '').strip() or None
             credit_amount   = request.form.get('credit_amount', '').strip() or None
@@ -1476,63 +1819,98 @@ def benefit_edit(id):
                 'UPDATE benefits SET name=?, description=?, credit_amount=?, period_type=?, is_subscription=?, '
                 'active=? WHERE id=?',
                 (name, description, credit_amount, period_type, is_subscription, active, id))
+            # Apply admin's reminder choices to every instance they hold of this card
+            my_ucs = [r['id'] for r in db.execute(
+                'SELECT id FROM user_cards WHERE user_id = ? AND card_id = ?',
+                (uid, b['card_id'])).fetchall()]
+            for my_uc in my_ucs:
+                _save_reminders(my_uc, reminder_days, custom_day)
+            db.commit()
+            db.close()
+            flash(f'Benefit "{name}" updated.', 'success')
+            next_url = request.form.get('_next') or url_for('catalog_card_edit', card_id=b['card_id'])
+            return redirect(next_url)
 
-        # "Pursuing" is no longer part of the benefit edit form. It moves to
-        # a dedicated per-user toggle on the card detail row (benefit_pursue_toggle).
-        _save_reminders(reminder_days, custom_day)
+        # Non-admin (or admin with explicit ?uc): per-instance reminders only
+        if not target_uc:
+            db.close()
+            flash('Could not determine which card instance to update.', 'danger')
+            return redirect(url_for('dashboard'))
+        _save_reminders(target_uc, reminder_days, custom_day)
         db.commit()
-        card_id      = b['card_id']
-        display_name = name if is_admin else b['name']
         db.close()
-        flash(f'Benefit "{display_name}" updated.', 'success')
-        next_url = request.form.get('_next') or url_for('card_detail', id=card_id)
+        flash(f'Reminders for "{b["name"]}" updated.', 'success')
+        next_url = request.form.get('_next') or url_for('card_detail', id=target_uc)
         return redirect(next_url)
 
-    existing_days = [r['days_before'] for r in db.execute(
-        'SELECT days_before FROM reminders WHERE user_id = ? AND benefit_id = ?',
-        (uid, id)
-    ).fetchall()]
+    # GET — render form
+    reminder_uc = target_uc
+    if reminder_uc is None and is_admin:
+        # Admin without ?uc: pull their own first instance for reminder display
+        own = db.execute(
+            'SELECT id FROM user_cards WHERE user_id = ? AND card_id = ? ORDER BY id LIMIT 1',
+            (uid, b['card_id'])).fetchone()
+        reminder_uc = own['id'] if own else None
+    existing_days = []
+    if reminder_uc is not None:
+        existing_days = [r['days_before'] for r in db.execute(
+            'SELECT days_before FROM reminders WHERE user_card_id = ? AND benefit_id = ?',
+            (reminder_uc, id)
+        ).fetchall()]
     form_data = dict(b)
     db.close()
     return render_template('benefits/form.html', card=card, form=form_data,
                            benefit=b, existing_reminder_days=existing_days,
-                           period_labels=PERIOD_LABELS)
+                           period_labels=PERIOD_LABELS, target_uc=target_uc)
 
 
 @app.route('/benefits/<int:id>/pursue-toggle', methods=['POST'])
 @login_required
 def benefit_pursue_toggle(id):
-    """Flip the current user's pursuing flag for this benefit. Per-user only;
-    has no effect on the catalog or on other users."""
+    """Flip the pursuit flag for this benefit on a specific user_cards
+    instance (?uc=<user_card_id>). Per-instance — has no effect on the
+    catalog, on other instances, or on other users."""
     db  = get_db()
     uid = g.user['id']
-    b = db.execute('''
-        SELECT b.id, b.name FROM benefits b
+    uc_id_raw = request.values.get('uc')
+    try:
+        target_uc = int(uc_id_raw) if uc_id_raw else None
+    except ValueError:
+        target_uc = None
+    if not target_uc:
+        db.close()
+        flash('Missing card instance for this action.', 'danger')
+        return redirect(request.referrer or url_for('dashboard'))
+
+    row = db.execute('''
+        SELECT b.name AS bname, uc.id AS uc_id
+        FROM benefits b
         JOIN user_cards uc ON uc.card_id = b.card_id
-        WHERE b.id = ? AND uc.user_id = ?
-    ''', (id, uid)).fetchone()
-    if not b:
+        WHERE b.id = ? AND uc.id = ? AND uc.user_id = ?
+    ''', (id, target_uc, uid)).fetchone()
+    if not row:
         db.close()
         flash('Benefit not found.', 'danger')
         return redirect(url_for('dashboard'))
-    row = db.execute(
-        'SELECT id, active FROM user_benefits WHERE user_id = ? AND benefit_id = ?',
-        (uid, id)).fetchone()
-    if row:
-        new_state = 0 if row['active'] else 1
+
+    existing = db.execute(
+        'SELECT id, active FROM user_benefits WHERE user_card_id = ? AND benefit_id = ?',
+        (target_uc, id)).fetchone()
+    if existing:
+        new_state = 0 if existing['active'] else 1
         db.execute('UPDATE user_benefits SET active = ? WHERE id = ?',
-                   (new_state, row['id']))
+                   (new_state, existing['id']))
     else:
-        # No override yet — default state is pursuing, so toggle to not pursuing
         new_state = 0
-        db.execute('INSERT INTO user_benefits (user_id, benefit_id, active) VALUES (?, ?, 0)',
-                   (uid, id))
+        db.execute(
+            'INSERT INTO user_benefits (user_card_id, benefit_id, active) VALUES (?, ?, 0)',
+            (target_uc, id))
     db.commit()
     db.close()
     if new_state:
-        flash(f'Resumed pursuing "{b["name"]}".', 'success')
+        flash(f'Resumed pursuing "{row["bname"]}".', 'success')
     else:
-        flash(f'Marked "{b["name"]}" as not pursuing. Hidden from your dashboard and emails.', 'info')
+        flash(f'Marked "{row["bname"]}" as not pursuing on this card.', 'info')
     return redirect(request.referrer or url_for('dashboard'))
 
 
@@ -1547,23 +1925,50 @@ def benefit_delete(id):
         db.commit()
         flash(f'Benefit "{row["name"]}" deleted.', 'success')
         db.close()
-        return redirect(url_for('card_detail', id=cid))
+        return redirect(url_for('catalog_card_edit', card_id=cid))
     db.close()
     return redirect(url_for('dashboard'))
 
 
 # ── Redemptions ────────────────────────────────────────────────────────────────
 
+def _resolve_target_uc_for_benefit(db, benefit_id, viewer_id, requested_uc=None):
+    """Find which user_cards instance to scope a benefit action to.
+    If requested_uc is given, validate it. Otherwise fall back to the viewer's
+    first user_cards row for the benefit's card (good enough for solo users)."""
+    if requested_uc:
+        row = db.execute('''
+            SELECT uc.id FROM user_cards uc
+            JOIN benefits b ON b.card_id = uc.card_id
+            WHERE uc.id = ? AND uc.user_id = ? AND b.id = ?
+        ''', (requested_uc, viewer_id, benefit_id)).fetchone()
+        if row:
+            return row['id']
+    fb = db.execute('''
+        SELECT uc.id FROM user_cards uc
+        JOIN benefits b ON b.card_id = uc.card_id
+        WHERE uc.user_id = ? AND b.id = ?
+        ORDER BY uc.id LIMIT 1
+    ''', (viewer_id, benefit_id)).fetchone()
+    return fb['id'] if fb else None
+
+
 @app.route('/benefits/<int:id>/redeem', methods=['POST'])
 @login_required
 def benefit_redeem(id):
     db  = get_db()
     uid = g.user['id']
-    b   = db.execute('''
-        SELECT b.* FROM benefits b
-        JOIN user_cards uc ON uc.card_id = b.card_id
-        WHERE b.id = ? AND uc.user_id = ?
-    ''', (id, uid)).fetchone()
+    uc_requested = request.values.get('uc')
+    try:
+        uc_requested = int(uc_requested) if uc_requested else None
+    except ValueError:
+        uc_requested = None
+    target_uc = _resolve_target_uc_for_benefit(db, id, uid, uc_requested)
+    if not target_uc:
+        db.close()
+        return jsonify({'error': 'Not found'}), 404
+
+    b = db.execute('SELECT * FROM benefits WHERE id = ?', (id,)).fetchone()
     if not b:
         db.close()
         return jsonify({'error': 'Not found'}), 404
@@ -1597,7 +2002,7 @@ def benefit_redeem(id):
         else:
             row_amount = b['credit_amount']
 
-        pool = effective_user_ids_for_card(db, b['card_id'], uid)
+        pool = effective_user_card_ids(db, target_uc)
         ph   = ','.join('?' * len(pool))
         cursor = start_date
         count = 0
@@ -1606,7 +2011,7 @@ def benefit_redeem(id):
             ps_str = str(p_start)
             # On shared cards, a row from ANY pool member covers this period.
             existing = db.execute(
-                f'SELECT id FROM redemptions WHERE user_id IN ({ph}) AND benefit_id=? AND period_start=?',
+                f'SELECT id FROM redemptions WHERE user_card_id IN ({ph}) AND benefit_id=? AND period_start=?',
                 (*pool, id, ps_str)
             ).fetchone()
             if existing:
@@ -1614,9 +2019,9 @@ def benefit_redeem(id):
                            (row_amount, existing['id']))
             else:
                 db.execute(
-                    'INSERT INTO redemptions (user_id, benefit_id, period_start, amount, notes) '
+                    'INSERT INTO redemptions (user_card_id, benefit_id, period_start, amount, notes) '
                     'VALUES (?, ?, ?, ?, ?)',
-                    (uid, id, ps_str, row_amount, notes or 'subscription'))
+                    (target_uc, id, ps_str, row_amount, notes or 'subscription'))
             count += 1
             cursor = p_end + timedelta(days=1)
         db.commit()
@@ -1642,12 +2047,32 @@ def benefit_redeem(id):
             amount = None
 
     db.execute(
-        'INSERT INTO redemptions (user_id, benefit_id, period_start, amount, notes) VALUES (?, ?, ?, ?, ?)',
-        (uid, id, str(period_start), amount, notes))
+        'INSERT INTO redemptions (user_card_id, benefit_id, period_start, amount, notes) VALUES (?, ?, ?, ?, ?)',
+        (target_uc, id, str(period_start), amount, notes))
     db.commit()
     db.close()
     flash('Redemption recorded.', 'success')
     return redirect(request.referrer or url_for('dashboard'))
+
+
+def _viewer_authorized_for_redemption(db, redemption_row, viewer_id):
+    """A user can edit/delete a redemption iff its user_card_id (or a peer in
+    its share group) belongs to them."""
+    uc_owner = db.execute(
+        'SELECT user_id, share_group_id FROM user_cards WHERE id = ?',
+        (redemption_row['user_card_id'],)
+    ).fetchone()
+    if not uc_owner:
+        return False
+    if uc_owner['user_id'] == viewer_id:
+        return True
+    if uc_owner['share_group_id'] is None:
+        return False
+    return bool(db.execute('''
+        SELECT 1 FROM card_share_members csm
+        JOIN user_cards uc ON uc.id = csm.user_card_id
+        WHERE csm.group_id = ? AND uc.user_id = ?
+    ''', (uc_owner['share_group_id'], viewer_id)).fetchone())
 
 
 @app.route('/redemptions/<int:id>/edit', methods=['POST'])
@@ -1655,7 +2080,7 @@ def benefit_redeem(id):
 def redemption_edit(id):
     db  = get_db()
     row = db.execute(
-        'SELECT r.*, b.period_type, b.card_id FROM redemptions r '
+        'SELECT r.*, b.period_type FROM redemptions r '
         'JOIN benefits b ON b.id = r.benefit_id '
         'WHERE r.id = ?',
         (id,)
@@ -1663,8 +2088,7 @@ def redemption_edit(id):
     if not row:
         db.close()
         return redirect(url_for('dashboard'))
-    pool = effective_user_ids_for_card(db, row['card_id'], g.user['id'])
-    if row['user_id'] not in pool:
+    if not _viewer_authorized_for_redemption(db, row, g.user['id']):
         db.close()
         return redirect(url_for('dashboard'))
     amount   = request.form.get('amount', '').strip() or None
@@ -1691,16 +2115,13 @@ def redemption_edit(id):
 def redemption_delete(id):
     db  = get_db()
     row = db.execute(
-        'SELECT r.user_id, b.card_id FROM redemptions r '
-        'JOIN benefits b ON b.id = r.benefit_id WHERE r.id = ?',
+        'SELECT user_card_id FROM redemptions WHERE id = ?',
         (id,)
     ).fetchone()
-    if row:
-        pool = effective_user_ids_for_card(db, row['card_id'], g.user['id'])
-        if row['user_id'] in pool:
-            db.execute('DELETE FROM redemptions WHERE id = ?', (id,))
-            db.commit()
-            flash('Redemption removed.', 'success')
+    if row and _viewer_authorized_for_redemption(db, row, g.user['id']):
+        db.execute('DELETE FROM redemptions WHERE id = ?', (id,))
+        db.commit()
+        flash('Redemption removed.', 'success')
     db.close()
     return redirect(request.referrer or url_for('dashboard'))
 
@@ -1710,18 +2131,27 @@ def redemption_delete(id):
 def benefit_redemptions(id):
     db  = get_db()
     uid = g.user['id']
-    b   = db.execute('''
+    uc_requested = request.values.get('uc')
+    try:
+        uc_requested = int(uc_requested) if uc_requested else None
+    except ValueError:
+        uc_requested = None
+    target_uc = _resolve_target_uc_for_benefit(db, id, uid, uc_requested)
+    if not target_uc:
+        db.close()
+        flash('Benefit not found.', 'danger')
+        return redirect(url_for('dashboard'))
+    b = db.execute('''
         SELECT b.*, c.name AS card_name FROM benefits b
         JOIN cards c ON c.id = b.card_id
-        JOIN user_cards uc ON uc.card_id = c.id
-        WHERE b.id = ? AND uc.user_id = ?
-    ''', (id, uid)).fetchone()
+        WHERE b.id = ?
+    ''', (id,)).fetchone()
     if not b:
         db.close()
         flash('Benefit not found.', 'danger')
         return redirect(url_for('dashboard'))
-    enriched = enrich_benefit(db, b, uid)
-    pool = effective_user_ids_for_card(db, b['card_id'], uid)
+    enriched = enrich_benefit(db, b, target_uc)
+    pool = effective_user_card_ids(db, target_uc)
     ph   = ','.join('?' * len(pool))
 
     # Build last-year period history
@@ -1733,7 +2163,7 @@ def benefit_redemptions(id):
         p_start, p_end = get_current_period(enriched['period_type'], for_date=check_date)
         pr = db.execute(
             f'SELECT COALESCE(SUM(amount),0) AS total, COUNT(*) AS cnt '
-            f'FROM redemptions WHERE user_id IN ({ph}) AND benefit_id=? AND period_start=?',
+            f'FROM redemptions WHERE user_card_id IN ({ph}) AND benefit_id=? AND period_start=?',
             (*pool, enriched['id'], str(p_start))
         ).fetchone()
         amount_used = float(pr['total'])
@@ -1752,7 +2182,7 @@ def benefit_redemptions(id):
     # Group all redemptions by period_start (pooled across share members)
     from collections import defaultdict
     all_redemptions = db.execute(
-        f'SELECT * FROM redemptions WHERE user_id IN ({ph}) AND benefit_id=? '
+        f'SELECT * FROM redemptions WHERE user_card_id IN ({ph}) AND benefit_id=? '
         f'ORDER BY period_start DESC, redeemed_at DESC',
         (*pool, id)
     ).fetchall()
@@ -1763,7 +2193,7 @@ def benefit_redemptions(id):
     # Older periods (beyond last year) that have redemptions
     oldest_in_range = str(period_history[0]['period_start']) if period_history else None
     has_older = bool(oldest_in_range and db.execute(
-        f'SELECT 1 FROM redemptions WHERE user_id IN ({ph}) AND benefit_id=? AND period_start<? LIMIT 1',
+        f'SELECT 1 FROM redemptions WHERE user_card_id IN ({ph}) AND benefit_id=? AND period_start<? LIMIT 1',
         (*pool, id, oldest_in_range)
     ).fetchone())
 
@@ -1772,7 +2202,7 @@ def benefit_redemptions(id):
     if show_all and oldest_in_range:
         old_starts = db.execute(
             f'SELECT DISTINCT period_start FROM redemptions '
-            f'WHERE user_id IN ({ph}) AND benefit_id=? AND period_start<? ORDER BY period_start DESC',
+            f'WHERE user_card_id IN ({ph}) AND benefit_id=? AND period_start<? ORDER BY period_start DESC',
             (*pool, id, oldest_in_range)
         ).fetchall()
         for row in old_starts:
@@ -1900,25 +2330,28 @@ def send_summary():
     if test_recipient and g.user['is_admin']:
         recipient = test_recipient
 
-    cards = db.execute('''
-        SELECT c.* FROM cards c
-        JOIN user_cards uc ON uc.card_id = c.id
+    user_cards = db.execute('''
+        SELECT uc.id AS user_card_id, uc.nickname, uc.card_id, c.name AS card_name
+        FROM user_cards uc
+        JOIN cards c ON c.id = uc.card_id
         WHERE uc.user_id = ? AND uc.active = 1 AND c.active = 1
-        ORDER BY c.name
+        ORDER BY c.name, uc.id
     ''', (uid,)).fetchall()
 
     cards_data = []
-    for card in cards:
+    for ucr in user_cards:
+        uc_id = ucr['user_card_id']
         raw = db.execute('''
             SELECT b.* FROM benefits b
-            LEFT JOIN user_benefits ub ON ub.benefit_id = b.id AND ub.user_id = ?
+            LEFT JOIN user_benefits ub ON ub.benefit_id = b.id AND ub.user_card_id = ?
             WHERE b.card_id = ? AND b.active = 1 AND COALESCE(ub.active, 1) = 1
-        ''', (uid, card['id'])).fetchall()
-        enriched = [enrich_benefit(db, b, uid) for b in raw]
+        ''', (uc_id, ucr['card_id'])).fetchall()
+        enriched = [enrich_benefit(db, b, uc_id) for b in raw]
         pending  = [b for b in enriched if not b['fully_used'] and not b['is_subscription']]
         pending.sort(key=lambda b: b['days_left'])
         if pending:
-            cards_data.append({'card_name': card['name'], 'benefits': pending})
+            display = ucr['nickname'] or ucr['card_name']
+            cards_data.append({'card_name': display, 'benefits': pending})
 
     db.close()
 
@@ -1970,19 +2403,20 @@ def _run_reminder_check(force=False):
             continue
 
         raw = db.execute('''
-            SELECT b.*, c.name AS card_name
+            SELECT b.*, c.name AS card_name, uc.id AS user_card_id, uc.nickname AS nickname
             FROM benefits b
             JOIN cards c       ON c.id      = b.card_id
             JOIN user_cards uc ON uc.card_id = c.id
-            LEFT JOIN user_benefits ub ON ub.benefit_id = b.id AND ub.user_id = ?
+            LEFT JOIN user_benefits ub ON ub.benefit_id = b.id AND ub.user_card_id = uc.id
             WHERE uc.user_id = ? AND uc.active = 1
                   AND b.active = 1 AND c.active = 1
                   AND COALESCE(ub.active, 1) = 1
-        ''', (uid, uid)).fetchall()
+        ''', (uid,)).fetchall()
 
         benefits_due = []
         for row in raw:
-            b = enrich_benefit(db, row, uid)
+            uc_id = row['user_card_id']
+            b = enrich_benefit(db, row, uc_id)
             if b['fully_used']:
                 continue
             period_start_str = str(b['period_start'])
@@ -1990,12 +2424,13 @@ def _run_reminder_check(force=False):
             for days_before in b['reminder_days']:
                 if dl == days_before or (force and dl <= days_before):
                     already_sent = db.execute(
-                        'SELECT 1 FROM sent_reminders WHERE user_id=? AND benefit_id=? AND period_start=? AND days_before=?',
-                        (uid, b['id'], period_start_str, days_before)
+                        'SELECT 1 FROM sent_reminders WHERE user_card_id=? AND benefit_id=? AND period_start=? AND days_before=?',
+                        (uc_id, b['id'], period_start_str, days_before)
                     ).fetchone()
                     if not already_sent or force:
+                        display_card = row['nickname'] or row['card_name']
                         benefits_due.append({
-                            'card_name':     row['card_name'],
+                            'card_name':     display_card,
                             'benefit_name':  b['name'],
                             'credit_amount': b['credit_amount'],
                             'amount_used':   b['amount_used'],
@@ -2004,9 +2439,9 @@ def _run_reminder_check(force=False):
                         })
                         if not already_sent:
                             db.execute(
-                                'INSERT OR IGNORE INTO sent_reminders (user_id, benefit_id, period_start, days_before) '
+                                'INSERT OR IGNORE INTO sent_reminders (user_card_id, benefit_id, period_start, days_before) '
                                 'VALUES (?, ?, ?, ?)',
-                                (uid, b['id'], period_start_str, days_before))
+                                (uc_id, b['id'], period_start_str, days_before))
                         break  # only include a benefit once per email
 
         if benefits_due:

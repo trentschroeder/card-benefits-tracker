@@ -395,6 +395,7 @@
 
 {% for dc in dashboard_cards %}
 {% set card = dc.card %}
+{% set uc   = dc.user_card_id %}
 {% set roi  = dc.roi %}
 {% set pending = dc.benefits | selectattr('fully_used', 'false') | list %}
 {% set done    = dc.benefits | selectattr('fully_used') | list %}
@@ -403,7 +404,8 @@
   <!-- Card header -->
   <div class="card-section-header">
     <div class="card-section-title">
-      <i class="bi bi-credit-card-2-front me-2 text-muted"></i>{{ card.name }}
+      <i class="bi bi-credit-card-2-front me-2 text-muted"></i>{{ dc.display_name }}
+      {% if dc.nickname %}<span class="text-muted ms-1" style="font-size:.75rem;">({{ card.name }})</span>{% endif %}
     </div>
     {% if roi.max_possible > 0 %}
     <div class="card-section-stats">
@@ -412,7 +414,7 @@
       <span>${{ roi.max_possible | int }} max</span>
     </div>
     {% endif %}
-    <a href="{{ url_for('card_detail', id=card.id) }}" class="card-section-edit" title="Edit card">
+    <a href="{{ url_for('card_detail', id=uc) }}" class="card-section-edit" title="Open card">
       <i class="bi bi-pencil"></i>
     </a>
   </div>
@@ -439,7 +441,10 @@
   {% endif %}
 
   {% if not dc.benefits %}
-    <div class="text-muted small px-3 pb-3">No active benefits. <a href="{{ url_for('benefit_new', card_id=card.id) }}">Add one</a>.</div>
+    <div class="text-muted small px-3 pb-3">
+      No active benefits.
+      {% if g.user.is_admin %}<a href="{{ url_for('benefit_new', card_id=card.id) }}">Add one</a>.{% endif %}
+    </div>
   {% else %}
 
   <div class="benefit-list">
@@ -469,7 +474,7 @@
       <div class="benefit-row {{ row_class }}">
         <span class="row-dot {{ dot_class }}" style="background:{{ dot_color }};"></span>
 
-        <a href="{{ url_for('benefit_redemptions', id=b.id) }}" class="row-name"
+        <a href="{{ url_for('benefit_redemptions', id=b.id, uc=uc) }}" class="row-name"
            style="text-decoration:none; color:inherit;">
           {{ b.name }}
           {% if b.description %}
@@ -499,7 +504,7 @@
         <div class="row-action">
           <button class="btn-add"
                   data-bs-toggle="modal"
-                  data-bs-target="#redeemModal{{ b.id }}"
+                  data-bs-target="#redeemModal{{ uc }}-{{ b.id }}"
                   title="Record usage">
             <i class="bi bi-plus"></i>
           </button>
@@ -509,16 +514,16 @@
 
     <!-- Done benefits (collapsed) -->
     {% if done %}
-    <div class="done-footer" onclick="toggleDone('done-{{ card.id }}')" id="done-toggle-{{ card.id }}">
-      <i class="bi bi-chevron-right" id="done-chevron-{{ card.id }}" style="font-size:.65rem; transition:transform .2s;"></i>
+    <div class="done-footer" onclick="toggleDone('done-{{ uc }}')" id="done-toggle-{{ uc }}">
+      <i class="bi bi-chevron-right" id="done-chevron-{{ uc }}" style="font-size:.65rem; transition:transform .2s;"></i>
       <span><i class="bi bi-check-circle-fill text-success me-1"></i>{{ done | length }} done</span>
     </div>
-    <div class="done-section" id="done-{{ card.id }}" style="display:none;">
+    <div class="done-section" id="done-{{ uc }}" style="display:none;">
       {% for b in done %}
         {% set badge_label = 'Done' %}
         <div class="benefit-row done-row">
           <span class="row-dot" style="background:#198754;"></span>
-          <a href="{{ url_for('benefit_redemptions', id=b.id) }}" class="row-name text-muted fw-normal"
+          <a href="{{ url_for('benefit_redemptions', id=b.id, uc=uc) }}" class="row-name text-muted fw-normal"
              style="text-decoration:none; color:inherit;">{{ b.name }}</a>
           <span class="row-period">{{ b.period_label }}</span>
           {% if b.credit_amount %}
@@ -544,15 +549,15 @@
 
     <!-- Not pursuing (per-user opt-out) -->
     {% if dc.not_pursuing %}
-    <div class="done-footer" onclick="toggleSection('notpursuing-{{ card.id }}', 'notpursuing-chevron-{{ card.id }}')">
-      <i class="bi bi-chevron-right" id="notpursuing-chevron-{{ card.id }}" style="font-size:.65rem; transition:transform .2s;"></i>
+    <div class="done-footer" onclick="toggleSection('notpursuing-{{ uc }}', 'notpursuing-chevron-{{ uc }}')">
+      <i class="bi bi-chevron-right" id="notpursuing-chevron-{{ uc }}" style="font-size:.65rem; transition:transform .2s;"></i>
       <span><i class="bi bi-eye-slash me-1"></i>{{ dc.not_pursuing | length }} not pursuing</span>
     </div>
-    <div id="notpursuing-{{ card.id }}" style="display:none;">
+    <div id="notpursuing-{{ uc }}" style="display:none;">
       {% for b in dc.not_pursuing %}
         <div class="benefit-row done-row">
           <span class="row-dot" style="background:#adb5bd;"></span>
-          <a href="{{ url_for('benefit_edit', id=b.id) }}" class="row-name text-muted fw-normal"
+          <a href="{{ url_for('benefit_edit', id=b.id, uc=uc) }}" class="row-name text-muted fw-normal"
              style="text-decoration:none; color:inherit;">{{ b.name }}</a>
           <span class="row-period">{{ b.period_type }}</span>
           {% if b.credit_amount %}
@@ -562,7 +567,7 @@
             <div class="row-bar-wrap"></div>
             <span class="row-amount text-muted">—</span>
           {% endif %}
-          <form method="post" action="{{ url_for('benefit_pursue_toggle', id=b.id) }}" class="row-action" style="margin:0;">
+          <form method="post" action="{{ url_for('benefit_pursue_toggle', id=b.id, uc=uc) }}" class="row-action" style="margin:0;">
             <button type="submit" class="btn btn-link btn-sm p-0" title="Resume pursuing">
               <i class="bi bi-arrow-counterclockwise"></i>
             </button>
@@ -574,15 +579,15 @@
 
     <!-- Catalog-archived (admin marked inactive) -->
     {% if dc.archived %}
-    <div class="done-footer" onclick="toggleSection('archived-{{ card.id }}', 'archived-chevron-{{ card.id }}')">
-      <i class="bi bi-chevron-right" id="archived-chevron-{{ card.id }}" style="font-size:.65rem; transition:transform .2s;"></i>
+    <div class="done-footer" onclick="toggleSection('archived-{{ uc }}', 'archived-chevron-{{ uc }}')">
+      <i class="bi bi-chevron-right" id="archived-chevron-{{ uc }}" style="font-size:.65rem; transition:transform .2s;"></i>
       <span><i class="bi bi-archive me-1"></i>{{ dc.archived | length }} archived</span>
     </div>
-    <div id="archived-{{ card.id }}" style="display:none;">
+    <div id="archived-{{ uc }}" style="display:none;">
       {% for b in dc.archived %}
         <div class="benefit-row done-row">
           <span class="row-dot" style="background:#adb5bd;"></span>
-          <a href="{{ url_for('benefit_edit', id=b.id) }}" class="row-name text-muted fw-normal"
+          <a href="{{ url_for('benefit_edit', id=b.id, uc=uc) }}" class="row-name text-muted fw-normal"
              style="text-decoration:none; color:inherit;">{{ b.name }}</a>
           <span class="row-period">{{ b.period_type }}</span>
           {% if b.credit_amount %}
@@ -607,17 +612,17 @@
 
 <!-- Redeem modals for this card -->
 {% for b in pending %}
-<div class="modal fade" id="redeemModal{{ b.id }}" tabindex="-1">
+<div class="modal fade" id="redeemModal{{ uc }}-{{ b.id }}" tabindex="-1">
   <div class="modal-dialog modal-sm">
     <div class="modal-content">
       <div class="modal-header py-2">
         <div>
           <div class="fw-semibold">{{ b.name }}</div>
-          <div class="text-muted" style="font-size:.75rem;">{{ card.name }}</div>
+          <div class="text-muted" style="font-size:.75rem;">{{ dc.display_name }}</div>
         </div>
         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
       </div>
-      <form method="post" action="{{ url_for('benefit_redeem', id=b.id) }}">
+      <form method="post" action="{{ url_for('benefit_redeem', id=b.id, uc=uc) }}">
         <div class="modal-body">
           {% if b.is_subscription %}
           {% if b.credit_amount %}
