@@ -64,7 +64,6 @@
         {% else %}
         {# Non-admin: catalog fields are read-only #}
         <div class="bg-body-tertiary p-3 rounded mb-4" style="background: var(--bg-table-head) !important;">
-          <p class="text-muted small mb-2"><i class="bi bi-info-circle me-1"></i>Catalog details (set by admin, read-only)</p>
           <div class="mb-2">
             <div class="text-muted small">Name</div>
             <div class="fw-semibold">{{ form.get('name', '') }}</div>
