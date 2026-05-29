@@ -1179,11 +1179,12 @@ def dashboard():
 
 # ── Cards ──────────────────────────────────────────────────────────────────────
 
-@app.route('/card-templates')
+@app.route('/add-card')
 @login_required
-def card_templates():
-    """The 'Add a Card' page. Lists published, active catalog cards and how many
-    instances the current user already has of each (multi-instance friendly)."""
+def add_card():
+    """User-facing 'browse and add' page. Shows published + active catalog
+    cards as tiles with per-tile Add buttons. Distinct from /card-templates,
+    which is admin's catalog-management surface."""
     db = get_db()
     rows = db.execute('''
         SELECT c.id, c.name, c.annual_fee, c.active,
@@ -1193,6 +1194,24 @@ def card_templates():
         WHERE c.published = 1 AND c.active = 1
         ORDER BY c.name
     ''', (g.user['id'],)).fetchall()
+    db.close()
+    return render_template('add_card.html', cards=rows)
+
+
+@app.route('/card-templates')
+@admin_required
+def card_templates():
+    """Admin's catalog-management page. Lists every catalog card (published
+    or not, active or not) with instance counts + edit/delete actions."""
+    db = get_db()
+    rows = db.execute('''
+        SELECT c.id, c.name, c.annual_fee, c.active, c.published,
+               (SELECT COUNT(*) FROM benefits b WHERE b.card_id = c.id) AS benefit_count,
+               (SELECT COUNT(*) FROM benefits b WHERE b.card_id = c.id AND b.active = 1) AS active_benefit_count,
+               (SELECT COUNT(*) FROM user_cards uc WHERE uc.card_id = c.id AND uc.active = 1) AS instance_count
+        FROM cards c
+        ORDER BY c.active DESC, c.published DESC, c.name
+    ''').fetchall()
     db.close()
     return render_template('card_templates.html', cards=rows)
 
@@ -1210,8 +1229,8 @@ def card_templates_add(card_id):
     ).fetchone()
     if not card:
         db.close()
-        flash('That card is not available in the templates.', 'danger')
-        return redirect(url_for('card_templates'))
+        flash('That card is not available.', 'danger')
+        return redirect(url_for('add_card'))
     nickname = request.form.get('nickname', '').strip() or None
     cur = db.execute(
         'INSERT INTO user_cards (user_id, card_id, active, nickname) VALUES (?, ?, 1, ?)',
