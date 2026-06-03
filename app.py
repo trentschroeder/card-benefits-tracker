@@ -629,6 +629,17 @@ def enrich_benefit(db, benefit, user_card_id):
 
 _PERIODS_PER_YEAR = {'monthly': 12, 'quarterly': 4, 'semi-annual': 2, 'annual': 1}
 
+# Reminder-day options offered per period type, plus a sane max for the custom
+# field. Kept shorter than the period so a chosen reminder can actually fire
+# within it (a 30-day reminder on a monthly benefit is meaningless).
+_REMINDER_DAY_CHOICES = {
+    'monthly':     [1, 3, 7],
+    'quarterly':   [1, 3, 7, 14, 30],
+    'semi-annual': [1, 3, 7, 14, 30, 60],
+    'annual':      [1, 3, 7, 14, 30, 60, 90],
+}
+_REMINDER_CUSTOM_MAX = {'monthly': 27, 'quarterly': 88, 'semi-annual': 178, 'annual': 364}
+
 
 def compute_card_roi(db, enriched_benefits, user_card_id):
     """Return (captured, max_possible) for a user_cards instance's benefits
@@ -2175,7 +2186,9 @@ def benefit_redemptions(id):
                            period_history=period_history, period_states=period_states,
                            redemptions=list(all_redemptions),
                            older_periods=older_periods, has_older=has_older, show_all=show_all,
-                           user_card_id=target_uc, is_ignored=is_ignored)
+                           user_card_id=target_uc, is_ignored=is_ignored,
+                           reminder_options=_REMINDER_DAY_CHOICES.get(enriched['period_type'], [1, 3, 7, 14, 30]),
+                           reminder_custom_max=_REMINDER_CUSTOM_MAX.get(enriched['period_type'], 365))
 
 
 # ── Settings ───────────────────────────────────────────────────────────────────
