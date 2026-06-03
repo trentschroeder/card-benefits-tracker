@@ -1886,9 +1886,9 @@ def benefit_pursue_toggle(id):
     db.commit()
     db.close()
     if new_state:
-        flash(f'Resumed pursuing "{row["bname"]}".', 'success')
+        flash(f'No longer ignoring "{row["bname"]}".', 'success')
     else:
-        flash(f'Marked "{row["bname"]}" as not pursuing on this card.', 'info')
+        flash(f'Ignored "{row["bname"]}" on this card.', 'info')
     return redirect(request.referrer or url_for('dashboard'))
 
 

@@ -177,8 +177,17 @@
   }
   .done-footer:hover { color: var(--text-primary); }
   .done-section { border-top: 1px dashed var(--border-color); }
-  .done-row { opacity: .5; }
-  .done-row:hover { opacity: .75; }
+  .done-row { opacity: .6; }
+  .done-row:hover { opacity: .85; }
+  /* Done/ignored rows sit faded and easy to overlook — give them a touch
+     more size on desktop so they stay scannable. Scoped to desktop because
+     the mobile grid already renders these rows larger. */
+  @media (min-width: 769px) {
+    .done-row { padding-top: 10px; padding-bottom: 10px; }
+    .done-row .row-name   { font-size: .92rem; }
+    .done-row .row-period,
+    .done-row .row-amount { font-size: .78rem; }
+  }
 
   /* ── AI pulsing ────────────────────────────────────────── */
   @keyframes dotPulse {
@@ -547,7 +556,7 @@
     {% if not_pursuing_all %}
     <div class="done-footer" onclick="toggleSection('notpursuing-{{ uc }}', 'notpursuing-chevron-{{ uc }}')">
       <i class="bi bi-chevron-right" id="notpursuing-chevron-{{ uc }}" style="font-size:.65rem; transition:transform .2s;"></i>
-      <span><i class="bi bi-eye-slash me-1"></i>{{ not_pursuing_all | length }} not pursuing</span>
+      <span><i class="bi bi-eye-slash me-1"></i>{{ not_pursuing_all | length }} ignored</span>
     </div>
     <div id="notpursuing-{{ uc }}" style="display:none;">
       {% for b in not_pursuing_all %}
@@ -567,7 +576,7 @@
           {# Per-user opt-out: offer a resume action. Catalog-archived rows
              (b.active == 0) can only be re-enabled by admin via /admin-cards. #}
           <form method="post" action="{{ url_for('benefit_pursue_toggle', id=b.id, uc=uc) }}" class="row-action" style="margin:0;">
-            <button type="submit" class="btn btn-link btn-sm p-0" title="Resume pursuing">
+            <button type="submit" class="btn btn-link btn-sm p-0" title="Stop ignoring">
               <i class="bi bi-arrow-counterclockwise"></i>
             </button>
           </form>
