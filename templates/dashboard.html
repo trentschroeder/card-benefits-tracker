@@ -562,7 +562,7 @@
       {% for b in not_pursuing_all %}
         <div class="benefit-row done-row">
           <span class="row-dot" style="background:#adb5bd;"></span>
-          <a href="{{ url_for('instance_benefit_edit', uc_id=uc, bid=b.id) }}" class="row-name text-muted fw-normal"
+          <a href="{{ url_for('benefit_redemptions', id=b.id, uc=uc) }}" class="row-name text-muted fw-normal"
              style="text-decoration:none; color:inherit;">{{ b.name }}</a>
           <span class="row-period">{{ b.period_type }}</span>
           {% if b.credit_amount %}

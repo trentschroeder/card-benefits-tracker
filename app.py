@@ -1761,9 +1761,10 @@ def catalog_benefit_delete(card_id, bid):
 @app.route('/cards/<int:uc_id>/benefits/<int:bid>/edit', methods=['GET', 'POST'])
 @login_required
 def instance_benefit_edit(uc_id, bid):
-    """Per-instance reminder editor. Anyone with this user_cards row can set
-    their own reminder schedule for a benefit on it. Catalog fields render
-    read-only for context — only reminders are editable."""
+    """Per-instance reminder + ignore save handler. The editor UI now lives
+    inline on the benefit page (benefit_redemptions); this route persists a
+    POST from there and redirects back. A GET (old bookmark/link) is bounced
+    to the benefit page, which carries the same controls."""
     db  = get_db()
     uid = g.user['id']
     uc_row = db.execute(
@@ -1809,23 +1810,16 @@ def instance_benefit_edit(uc_id, bid):
         db.commit()
         db.close()
         flash(f'Settings for "{b["name"]}" updated.', 'success')
+        # Honor an explicit return target (the benefit page that posted this
+        # form); fall back to the card detail page. Only allow local paths.
+        nxt = request.form.get('next', '')
+        if nxt.startswith('/') and not nxt.startswith('//'):
+            return redirect(nxt)
         return redirect(url_for('card_detail', id=uc_id))
 
-    existing_days = [r['days_before'] for r in db.execute(
-        'SELECT days_before FROM reminders WHERE user_card_id = ? AND benefit_id = ?',
-        (uc_id, bid)
-    ).fetchall()]
-    ub = db.execute(
-        'SELECT active FROM user_benefits WHERE user_card_id = ? AND benefit_id = ?',
-        (uc_id, bid)).fetchone()
-    is_ignored = ub is not None and ub['active'] == 0
+    # GET: the editor is now inline on the benefit page — send the user there.
     db.close()
-    return render_template('benefits/instance_edit.html',
-                           card=card, benefit=b, user_card_id=uc_id,
-                           uc_nickname=uc_row['nickname'],
-                           existing_reminder_days=existing_days,
-                           is_ignored=is_ignored,
-                           period_labels=PERIOD_LABELS)
+    return redirect(url_for('benefit_redemptions', id=bid, uc=uc_id))
 
 
 @app.route('/benefits/<int:id>/pursue-toggle', methods=['POST'])
@@ -2171,12 +2165,17 @@ def benefit_redemptions(id):
                                    'amount_used': amount_used, 'state': state})
             period_states[ps_str] = state
 
+    ub = db.execute(
+        'SELECT active FROM user_benefits WHERE user_card_id = ? AND benefit_id = ?',
+        (target_uc, id)).fetchone()
+    is_ignored = ub is not None and ub['active'] == 0
+
     db.close()
     return render_template('benefits/redemptions.html', benefit=enriched,
                            period_history=period_history, period_states=period_states,
                            redemptions=list(all_redemptions),
                            older_periods=older_periods, has_older=has_older, show_all=show_all,
-                           user_card_id=target_uc)
+                           user_card_id=target_uc, is_ignored=is_ignored)
 
 
 # ── Settings ───────────────────────────────────────────────────────────────────

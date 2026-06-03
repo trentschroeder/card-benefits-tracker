@@ -112,12 +112,8 @@
         </td>
         <td class="text-end">
           <div class="d-flex gap-1 justify-content-end">
-            <a href="{{ url_for('benefit_redemptions', id=b.id, uc=card.user_card_id) }}" class="btn btn-outline-secondary btn-sm" title="History">
+            <a href="{{ url_for('benefit_redemptions', id=b.id, uc=card.user_card_id) }}" class="btn btn-outline-secondary btn-sm" title="Open benefit (history &amp; reminders)">
               <i class="bi bi-clock-history"></i>
-            </a>
-            <a href="{{ url_for('instance_benefit_edit', uc_id=card.user_card_id, bid=b.id) }}" class="btn btn-outline-secondary btn-sm"
-               title="My settings (reminders &amp; ignore)">
-              <i class="bi bi-gear"></i>
             </a>
           </div>
         </td>
