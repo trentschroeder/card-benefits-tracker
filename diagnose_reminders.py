@@ -36,16 +36,13 @@ def share_pool(db, user_card_id):
 def main():
     db = connect()
     users = db.execute('''
-        SELECT id, email, notification_email, reminders_enabled
+        SELECT id, email, notification_email
         FROM users ORDER BY id
     ''').fetchall()
 
     for u in users:
         recipient = u['notification_email'] or u['email']
-        flag = 'ENABLED' if u['reminders_enabled'] else 'DISABLED (no reminders ever sent)'
-        print(f"\n=== user {u['id']}  {u['email']}  ->  {recipient}   reminders: {flag} ===")
-        if not u['reminders_enabled']:
-            continue
+        print(f"\n=== user {u['id']}  {u['email']}  ->  {recipient} ===")
 
         cards = db.execute('''
             SELECT uc.id AS uc_id, uc.active AS uc_active, uc.nickname,

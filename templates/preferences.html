@@ -18,19 +18,10 @@
             Leave blank to use your login email (<strong>{{ g.user.email }}</strong>).
           </div>
         </div>
-        <div class="form-check form-switch mb-2">
-          <input name="reminders_enabled" type="checkbox" class="form-check-input" id="remindersToggle"
-                 {% if g.user.reminders_enabled %}checked{% endif %}>
-          <label class="form-check-label" for="remindersToggle">
-            Send me reminder emails when a benefit period is ending
-          </label>
-        </div>
-        <div class="form-check form-switch mb-3">
-          <input name="summary_enabled" type="checkbox" class="form-check-input" id="summaryToggle"
-                 {% if g.user.summary_enabled %}checked{% endif %}>
-          <label class="form-check-label" for="summaryToggle">
-            Allow scheduled summary emails (when enabled in a future release)
-          </label>
+        <div class="form-text mb-3">
+          <i class="bi bi-info-circle me-1"></i>Reminder emails are set per benefit — choose how
+          many days before each period you want a heads-up (or ignore a benefit) from that
+          benefit's page. A benefit with no reminder days set sends none.
         </div>
         <button class="btn btn-primary">Save Preferences</button>
       </form>

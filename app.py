@@ -2186,11 +2186,9 @@ def preferences():
     db = get_db()
     if request.method == 'POST':
         notification_email = request.form.get('notification_email', '').strip() or None
-        reminders_enabled  = 1 if request.form.get('reminders_enabled') else 0
-        summary_enabled    = 1 if request.form.get('summary_enabled') else 0
         db.execute(
-            'UPDATE users SET notification_email = ?, reminders_enabled = ?, summary_enabled = ? WHERE id = ?',
-            (notification_email, reminders_enabled, summary_enabled, g.user['id']))
+            'UPDATE users SET notification_email = ? WHERE id = ?',
+            (notification_email, g.user['id']))
         db.commit()
         db.close()
         flash('Preferences saved.', 'success')
@@ -2341,7 +2339,6 @@ def _run_reminder_check(force=False):
     users = db.execute('''
         SELECT id, email, notification_email
         FROM users
-        WHERE reminders_enabled = 1
     ''').fetchall()
 
     total_sent = 0
