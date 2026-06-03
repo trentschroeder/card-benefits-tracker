@@ -1,0 +1,10 @@
+[Unit]
+Description=Poll origin/main and deploy credit-card-benefits
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=2min
+Unit=card-benefits-deploy.service
+
+[Install]
+WantedBy=timers.target

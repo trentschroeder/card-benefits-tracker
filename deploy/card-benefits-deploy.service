@@ -1,0 +1,10 @@
+[Unit]
+Description=Pull-based deploy for credit-card-benefits
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# Run via bash explicitly so the script's execute bit doesn't matter
+# (it's authored on Windows, where the mode isn't always preserved).
+ExecStart=/bin/bash /var/www/credit-card-benefits/deploy.sh

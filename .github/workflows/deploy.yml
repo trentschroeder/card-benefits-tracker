@@ -1,8 +1,11 @@
 name: Deploy to VPS
 
+# NOTE: push-triggered deploys are disabled. The provider's edge drops inbound
+# SSH (:22) from GitHub's datacenter runner IPs, so this job times out. The box
+# now self-deploys via the card-benefits-deploy.timer systemd unit (it polls
+# origin/main and pulls — outbound over 443). This workflow is kept only as a
+# manually dispatchable fallback for when you're on an allowed network.
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 concurrency:
