@@ -115,16 +115,9 @@
             <a href="{{ url_for('benefit_redemptions', id=b.id, uc=card.user_card_id) }}" class="btn btn-outline-secondary btn-sm" title="History">
               <i class="bi bi-clock-history"></i>
             </a>
-            <form method="post" action="{{ url_for('benefit_pursue_toggle', id=b.id, uc=card.user_card_id) }}" class="d-inline"
-                  {% if b.user_active != 0 %}onsubmit="return confirm('Ignore &quot;{{ b.name|e }}&quot;? You won't receive any reminder or summary emails for this benefit until you stop ignoring it on this card.');"{% endif %}>
-              <button type="submit" class="btn btn-outline-secondary btn-sm"
-                      title="{% if b.user_active == 0 %}Stop ignoring this benefit{% else %}Ignore this benefit{% endif %}">
-                <i class="bi bi-{% if b.user_active == 0 %}eye{% else %}eye-slash{% endif %}"></i>
-              </button>
-            </form>
             <a href="{{ url_for('instance_benefit_edit', uc_id=card.user_card_id, bid=b.id) }}" class="btn btn-outline-secondary btn-sm"
-               title="My reminder schedule">
-              <i class="bi bi-bell"></i>
+               title="My settings (reminders &amp; ignore)">
+              <i class="bi bi-gear"></i>
             </a>
           </div>
         </td>

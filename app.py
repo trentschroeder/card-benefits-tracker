@@ -1825,20 +1825,31 @@ def instance_benefit_edit(uc_id, bid):
                     (uc_id, bid, int(custom_day)))
             except ValueError:
                 pass
+        # Ignore flag: per-user opt-out for this benefit on this card instance.
+        ignored = 1 if request.form.get('ignored') else 0
+        db.execute(
+            'INSERT INTO user_benefits (user_card_id, benefit_id, active) VALUES (?, ?, ?) '
+            'ON CONFLICT(user_card_id, benefit_id) DO UPDATE SET active = excluded.active',
+            (uc_id, bid, 0 if ignored else 1))
         db.commit()
         db.close()
-        flash(f'Reminders for "{b["name"]}" updated.', 'success')
+        flash(f'Settings for "{b["name"]}" updated.', 'success')
         return redirect(url_for('card_detail', id=uc_id))
 
     existing_days = [r['days_before'] for r in db.execute(
         'SELECT days_before FROM reminders WHERE user_card_id = ? AND benefit_id = ?',
         (uc_id, bid)
     ).fetchall()]
+    ub = db.execute(
+        'SELECT active FROM user_benefits WHERE user_card_id = ? AND benefit_id = ?',
+        (uc_id, bid)).fetchone()
+    is_ignored = ub is not None and ub['active'] == 0
     db.close()
     return render_template('benefits/instance_edit.html',
                            card=card, benefit=b, user_card_id=uc_id,
                            uc_nickname=uc_row['nickname'],
                            existing_reminder_days=existing_days,
+                           is_ignored=is_ignored,
                            period_labels=PERIOD_LABELS)
 
 

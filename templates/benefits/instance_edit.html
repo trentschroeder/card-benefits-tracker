@@ -7,8 +7,8 @@
   <span class="text-muted">on {{ uc_nickname or card.name }}</span>
 </div>
 <p class="text-muted small mb-4">
-  Your reminder schedule for this benefit on this specific card. Only affects
-  you — other people sharing this card set their own reminders.
+  Your settings for this benefit on this specific card. Only affect you —
+  other people sharing this card set their own.
 </p>
 
 <!-- Read-only benefit summary -->
@@ -34,10 +34,25 @@
   </div>
 </div>
 
-<!-- Reminder schedule (per-instance, per-user) -->
+<!-- Per-instance, per-user settings -->
 <div class="card p-4">
-  <h5 class="mb-3"><i class="bi bi-bell me-2"></i>My reminder schedule</h5>
   <form method="post">
+
+    <!-- Ignore this benefit -->
+    <div class="mb-4 pb-3 border-bottom">
+      <div class="form-check form-switch">
+        <input type="checkbox" name="ignored" value="1" id="ignoreBenefit"
+               class="form-check-input" {% if is_ignored %}checked{% endif %}>
+        <label class="form-check-label fw-semibold" for="ignoreBenefit">Ignore this benefit</label>
+      </div>
+      <div class="form-text">
+        Ignored benefits drop off your active list and never trigger reminder or
+        summary emails — handy for perks you don't plan to use. You can switch it
+        back on any time.
+      </div>
+    </div>
+
+    <h5 class="mb-3"><i class="bi bi-bell me-2"></i>My reminder schedule</h5>
     <div class="mb-3" id="reminderSection">
       <div class="form-text mb-2">
         Send a reminder email this many days before the period ends (if credit remains).
