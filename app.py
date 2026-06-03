@@ -1263,7 +1263,7 @@ def card_share(id):
     if not my_uc:
         db.close()
         flash('You can only share a card that is on your own dashboard.', 'danger')
-        return redirect(url_for('cards_list'))
+        return redirect(url_for('dashboard'))
 
     invitee = db.execute('SELECT id, email FROM users WHERE email = ?', (raw_email,)).fetchone()
     if not invitee:
@@ -1429,7 +1429,7 @@ def user_card_rename(id):
     if not row:
         db.close()
         flash('Card not found.', 'danger')
-        return redirect(url_for('cards_list'))
+        return redirect(url_for('dashboard'))
     db.execute('UPDATE user_cards SET nickname = ? WHERE id = ?', (nickname, id))
     db.commit()
     db.close()
@@ -1453,46 +1453,21 @@ def card_remove(id):
     if not row:
         db.close()
         flash('Card not found on your dashboard.', 'danger')
-        return redirect(url_for('cards_list'))
+        return redirect(url_for('dashboard'))
     db.execute('UPDATE user_cards SET active = 0 WHERE id = ?', (row['id'],))
     db.commit()
     db.close()
     flash(f'"{row["label"]}" removed from your dashboard.', 'success')
-    return redirect(url_for('cards_list'))
+    return redirect(url_for('dashboard'))
 
 
 @app.route('/cards')
 @login_required
 def cards_list():
-    """List all of the current user's card instances (multi-instance friendly:
-    two of the same catalog card show as two rows)."""
-    db    = get_db()
-    rows  = db.execute('''
-        SELECT uc.id          AS user_card_id,
-               uc.nickname    AS nickname,
-               uc.active      AS uc_active,
-               c.id           AS card_id,
-               c.name         AS card_name,
-               c.active       AS card_active,
-               COUNT(b.id)    AS benefit_count
-        FROM user_cards uc
-        JOIN cards c ON c.id = uc.card_id
-        LEFT JOIN benefits b ON b.card_id = c.id AND b.active = 1
-        WHERE uc.user_id = ?
-        GROUP BY uc.id
-        ORDER BY uc.active DESC, c.active DESC, c.name, uc.id
-    ''', (g.user['id'],)).fetchall()
-    cards = [{
-        'id':            r['user_card_id'],
-        'card_id':       r['card_id'],
-        'name':          r['nickname'] or r['card_name'],
-        'card_name':     r['card_name'],
-        'nickname':      r['nickname'],
-        'active':        r['uc_active'] and r['card_active'],
-        'benefit_count': r['benefit_count'],
-    } for r in rows]
-    db.close()
-    return render_template('cards/list.html', cards=cards)
+    """Deprecated: the Cards list page was removed. Per-card management now
+    lives on card_detail, reached from the dashboard's "Open card" link. Kept
+    as a redirect so old bookmarks/links land on the dashboard instead of 404ing."""
+    return redirect(url_for('dashboard'))
 
 
 @app.route('/cards/new', methods=['GET', 'POST'])
@@ -1550,7 +1525,7 @@ def card_detail(id):
     if not row:
         db.close()
         flash('Card not found.', 'danger')
-        return redirect(url_for('cards_list'))
+        return redirect(url_for('dashboard'))
 
     raw_benefits = db.execute('''
         SELECT b.*, COALESCE(ub.active, 1) AS user_active
