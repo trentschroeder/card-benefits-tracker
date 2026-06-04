@@ -750,14 +750,6 @@
           </a>
         </li>
         {% endif %}
-        {% if g.user %}
-        <li class="nav-item">
-          <a class="nav-link {% if request.path == '/preferences' %}active{% endif %}"
-             href="{{ url_for('preferences') }}">
-            <i class="bi bi-person-gear me-1"></i>Preferences
-          </a>
-        </li>
-        {% endif %}
         {% if g.user and g.user.is_admin %}
         <li class="nav-item">
           <a class="nav-link {% if request.path.startswith('/users') %}active{% endif %}"
@@ -765,6 +757,8 @@
             <i class="bi bi-people me-1"></i>Users
           </a>
         </li>
+        {% endif %}
+        {% if g.user %}
         <li class="nav-item">
           <a class="nav-link {% if request.path == '/settings' %}active{% endif %}"
              href="{{ url_for('settings') }}">
@@ -815,19 +809,14 @@
     <span>Templates</span>
   </a>
   {% endif %}
-  {% if g.user %}
-  <a class="tab-item {% if request.path == '/preferences' %}active{% endif %}"
-     href="{{ url_for('preferences') }}">
-    <i class="bi bi-person-gear"></i>
-    <span>Prefs</span>
-  </a>
-  {% endif %}
   {% if g.user and g.user.is_admin %}
   <a class="tab-item {% if request.path.startswith('/users') %}active{% endif %}"
      href="{{ url_for('users_list') }}">
     <i class="bi bi-people"></i>
     <span>Users</span>
   </a>
+  {% endif %}
+  {% if g.user %}
   <a class="tab-item {% if request.path == '/settings' %}active{% endif %}"
      href="{{ url_for('settings') }}">
     <i class="bi bi-gear"></i>

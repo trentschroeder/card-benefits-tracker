@@ -3,6 +3,7 @@ import os
 import secrets
 import sqlite3
 from datetime import date, datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 from flask import (Flask, flash, g, jsonify, redirect, render_template,
                    request, send_from_directory, session, url_for)
@@ -742,13 +743,60 @@ def login():
                 session.permanent = True
                 return redirect(request.args.get('next') or url_for('dashboard'))
         error = 'Invalid email or password.'
-    return render_template('login.html', error=error)
+    db = get_db()
+    signup_enabled = get_setting(db, 'signup_open', '0') == '1'
+    db.close()
+    return render_template('login.html', error=error, signup_enabled=signup_enabled)
 
 
 @app.route('/logout')
 def logout():
     session.clear()
     return redirect(url_for('login'))
+
+
+@app.route('/signup', methods=['GET', 'POST'])
+def signup():
+    """Open self-service sign-up, toggled by the admin setting 'signup_open'
+    ('1' = open; default off). Open registration. Creates a non-admin user and
+    logs them in."""
+    if g.get('user'):
+        return redirect(url_for('dashboard'))
+    db = get_db()
+    if get_setting(db, 'signup_open', '0') != '1':
+        db.close()
+        flash("Sign-up isn't open right now — ask the administrator for an invite.", 'info')
+        return redirect(url_for('login'))
+
+    error = None
+    email = ''
+    if request.method == 'POST':
+        email    = request.form.get('email', '').strip()
+        password = request.form.get('password', '')
+        confirm  = request.form.get('confirm_password', '')
+        if not (email and '@' in email):
+            error = 'A valid email is required.'
+        elif len(password) < 8:
+            error = 'Password must be at least 8 characters.'
+        elif password != confirm:
+            error = "Passwords don't match."
+        elif db.execute('SELECT id FROM users WHERE email = ?', (email,)).fetchone():
+            error = 'An account with that email already exists — try signing in.'
+        if error is None:
+            cur = db.execute(
+                'INSERT INTO users (email, password_hash, is_admin) VALUES (?, ?, 0)',
+                (email, generate_password_hash(password)))
+            uid = cur.lastrowid
+            db.commit()
+            db.close()
+            session.clear()
+            session['user_id']  = uid
+            session.permanent   = True
+            flash('Welcome! Add your first card to get started.', 'success')
+            return redirect(url_for('dashboard'))
+
+    db.close()
+    return render_template('signup.html', error=error, email=email)
 
 
 # ── Invitations / user management ─────────────────────────────────────────────
@@ -2193,21 +2241,11 @@ def benefit_redemptions(id):
 
 # ── Settings ───────────────────────────────────────────────────────────────────
 
-@app.route('/preferences', methods=['GET', 'POST'])
+@app.route('/preferences')
 @login_required
 def preferences():
-    db = get_db()
-    if request.method == 'POST':
-        notification_email = request.form.get('notification_email', '').strip() or None
-        db.execute(
-            'UPDATE users SET notification_email = ? WHERE id = ?',
-            (notification_email, g.user['id']))
-        db.commit()
-        db.close()
-        flash('Preferences saved.', 'success')
-        return redirect(url_for('preferences'))
-    db.close()
-    return render_template('preferences.html')
+    """Merged into the unified Settings page; kept as a redirect for old links."""
+    return redirect(url_for('settings'))
 
 
 @app.route('/preferences/password', methods=['POST'])
@@ -2218,51 +2256,89 @@ def change_password():
     confirm = request.form.get('confirm_password', '')
     if not check_password_hash(g.user['password_hash'], current):
         flash('Current password is incorrect.', 'danger')
-        return redirect(url_for('preferences'))
+        return redirect(url_for('settings'))
     if len(new) < 8:
         flash('New password must be at least 8 characters.', 'danger')
-        return redirect(url_for('preferences'))
+        return redirect(url_for('settings'))
     if new != confirm:
         flash('New passwords do not match.', 'danger')
-        return redirect(url_for('preferences'))
+        return redirect(url_for('settings'))
     db = get_db()
     db.execute('UPDATE users SET password_hash = ? WHERE id = ?',
                (generate_password_hash(new), g.user['id']))
     db.commit()
     db.close()
     flash('Password updated.', 'success')
-    return redirect(url_for('preferences'))
+    return redirect(url_for('settings'))
 
 
 @app.route('/settings', methods=['GET', 'POST'])
-@admin_required
+@login_required
 def settings():
+    """Unified settings page. Everyone manages their own notification email and
+    password here; admins additionally manage the system-wide SMTP sender, the
+    daily reminder hour, and its timezone. Admin fields are gated both in the
+    template (is_admin) and here (section == 'email_config' requires is_admin)."""
     db = get_db()
     if request.method == 'POST':
-        gmail_user     = request.form.get('gmail_user', '').strip()
-        gmail_password = request.form.get('gmail_password', '').strip()
-        reminder_hour  = request.form.get('reminder_hour', '8').strip()
+        section = request.form.get('section', 'profile')
 
-        if gmail_user:
-            set_setting(db, 'gmail_user', gmail_user)
-        if gmail_password:
-            set_setting(db, 'gmail_app_password', gmail_password)
-        if reminder_hour:
-            set_setting(db, 'reminder_hour', reminder_hour)
+        if section == 'email_config':
+            if not g.user['is_admin']:
+                db.close()
+                flash('Admin access required.', 'danger')
+                return redirect(url_for('settings'))
+            gmail_user     = request.form.get('gmail_user', '').strip()
+            gmail_password = request.form.get('gmail_password', '').strip()
+            reminder_hour  = request.form.get('reminder_hour', '8').strip()
+            reminder_tz    = request.form.get('reminder_tz', '').strip()
+            if gmail_user:
+                set_setting(db, 'gmail_user', gmail_user)
+            if gmail_password:
+                set_setting(db, 'gmail_app_password', gmail_password)
+            if reminder_hour:
+                set_setting(db, 'reminder_hour', reminder_hour)
+            tz_bad = bool(reminder_tz) and valid_tz(reminder_tz, None) is None
+            if reminder_tz and not tz_bad:
+                set_setting(db, 'reminder_tz', reminder_tz)
+            db.commit()
+            hour = int(reminder_hour) if reminder_hour.isdigit() else 8
+            _reschedule_reminder(hour, get_setting(db, 'reminder_tz', DEFAULT_TZ))
+            db.close()
+            if tz_bad:
+                flash('Saved, but that timezone wasn\'t recognized — left unchanged.', 'warning')
+            else:
+                flash('Email settings saved.', 'success')
+            return redirect(url_for('settings'))
 
+        if section == 'signup':
+            if not g.user['is_admin']:
+                db.close()
+                flash('Admin access required.', 'danger')
+                return redirect(url_for('settings'))
+            set_setting(db, 'signup_open', '1' if request.form.get('signup_open') else '0')
+            db.commit()
+            db.close()
+            flash('Sign-up settings saved.', 'success')
+            return redirect(url_for('settings'))
+
+        # Per-user profile (every logged-in user)
+        notification_email = request.form.get('notification_email', '').strip() or None
+        db.execute('UPDATE users SET notification_email = ? WHERE id = ?',
+                   (notification_email, g.user['id']))
         db.commit()
-        flash('Settings saved.', 'success')
-
-        # Reschedule with new hour if scheduler is running
-        _reschedule_reminder(int(reminder_hour))
-
         db.close()
+        flash('Preferences saved.', 'success')
         return redirect(url_for('settings'))
 
-    cfg = {
-        'gmail_user':    get_setting(db, 'gmail_user', ''),
-        'reminder_hour': get_setting(db, 'reminder_hour', '8'),
-    }
+    cfg = {}
+    if g.user['is_admin']:
+        cfg = {
+            'gmail_user':    get_setting(db, 'gmail_user', ''),
+            'reminder_hour': get_setting(db, 'reminder_hour', '8'),
+            'reminder_tz':   get_setting(db, 'reminder_tz', DEFAULT_TZ),
+            'signup_open':   get_setting(db, 'signup_open', '0') == '1',
+        }
     db.close()
     return render_template('settings.html', cfg=cfg)
 
@@ -2282,7 +2358,7 @@ def send_summary():
     if not all([gmail_user, gmail_pass]):
         db.close()
         flash('Gmail credentials are not configured. Ask the administrator to set them up.', 'danger')
-        return redirect(url_for('preferences'))
+        return redirect(url_for('settings'))
 
     uid       = g.user['id']
     recipient = (g.user['notification_email'] or g.user['email'])
@@ -2316,7 +2392,7 @@ def send_summary():
 
     db.close()
 
-    back = url_for('settings') if test_recipient and g.user['is_admin'] else url_for('preferences')
+    back = url_for('settings')
 
     if not cards_data:
         flash('Nothing to send — all benefits are fully used or handled by subscription.', 'info')
@@ -2382,7 +2458,11 @@ def _run_reminder_check(force=False):
             period_start_str = str(b['period_start'])
             dl = b['days_left']
             for days_before in b['reminder_days']:
-                if dl == days_before or (force and dl <= days_before):
+                # Catch-up: fire when at or past the threshold and this
+                # (period, days_before) slot hasn't been sent — so a missed day
+                # still goes out instead of being skipped forever. The per-slot
+                # dedup below keeps the normal one-email-per-threshold cadence.
+                if dl <= days_before:
                     already_sent = db.execute(
                         'SELECT 1 FROM sent_reminders WHERE user_card_id=? AND benefit_id=? AND period_start=? AND days_before=?',
                         (uc_id, b['id'], period_start_str, days_before)
@@ -2422,23 +2502,40 @@ def _run_reminder_check(force=False):
 _scheduler = None
 
 
-def _reschedule_reminder(hour):
+DEFAULT_TZ = 'America/Chicago'
+
+
+def valid_tz(tz, default=DEFAULT_TZ):
+    """Return tz if it's a valid IANA zone, else default. APScheduler accepts
+    the zone as a string and resolves it itself."""
+    try:
+        ZoneInfo(tz)
+        return tz
+    except Exception:
+        return default
+
+
+def _reschedule_reminder(hour, tz=DEFAULT_TZ):
     global _scheduler
     if _scheduler is None:
         return
     try:
-        _scheduler.reschedule_job('daily_reminder', trigger='cron', hour=hour, minute=0)
+        _scheduler.reschedule_job('daily_reminder', trigger='cron',
+                                  hour=hour, minute=0, timezone=valid_tz(tz))
     except Exception:
         pass
 
 
-def start_scheduler(hour=8):
+def start_scheduler(hour=8, tz=DEFAULT_TZ):
     global _scheduler
     from apscheduler.schedulers.background import BackgroundScheduler
 
+    # Pass the timezone as a string so APScheduler resolves it via pytz (it
+    # rejects bare zoneinfo tzinfos). reminder_hour is interpreted in this zone.
     _scheduler = BackgroundScheduler()
     _scheduler.add_job(_run_reminder_check, 'cron', id='daily_reminder',
-                       hour=hour, minute=0, misfire_grace_time=3600)
+                       hour=hour, minute=0, timezone=valid_tz(tz),
+                       misfire_grace_time=3600)
     _scheduler.start()
 
 
@@ -2456,8 +2553,9 @@ if os.environ.get('WERKZEUG_RUN_MAIN') != 'false_sentinel':  # always true, just
     if not _is_werkzeug_parent:
         _db = get_db()
         _hour = int(get_setting(_db, 'reminder_hour', '8'))
+        _tz   = get_setting(_db, 'reminder_tz', DEFAULT_TZ)
         _db.close()
-        start_scheduler(_hour)
+        start_scheduler(_hour, _tz)
 
 
 # ── Entry point ────────────────────────────────────────────────────────────────

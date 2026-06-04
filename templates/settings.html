@@ -6,11 +6,41 @@
 
 <div class="row g-4">
   <div class="col-lg-7">
+
+    <!-- Notification email (every user) -->
     <div class="card p-4 mb-4">
-      <h5 class="mb-3"><i class="bi bi-envelope me-2"></i>Email Reminders</h5>
+      <h5 class="mb-3"><i class="bi bi-envelope me-2"></i>Email Notifications</h5>
       <form method="post">
+        <input type="hidden" name="section" value="profile">
         <div class="mb-3">
-          <label class="form-label">Gmail Address (sender)</label>
+          <label class="form-label">Notification Email</label>
+          <input name="notification_email" type="email" class="form-control"
+                 value="{{ g.user.notification_email or '' }}"
+                 placeholder="{{ g.user.email }}">
+          <div class="form-text">
+            Where your reminders and summaries are delivered. Leave blank to use
+            your login email (<strong>{{ g.user.email }}</strong>).
+          </div>
+        </div>
+        <div class="form-text mb-3">
+          <i class="bi bi-info-circle me-1"></i>Reminder timing is set per benefit from
+          each benefit's page — that's also where you ignore a benefit.
+        </div>
+        <button class="btn btn-primary">Save</button>
+      </form>
+    </div>
+
+    {% if g.user.is_admin %}
+    <!-- System email delivery + schedule (admin only) -->
+    <div class="card p-4 mb-4">
+      <h5 class="mb-3"><i class="bi bi-sliders me-2"></i>Email Delivery &amp; Schedule
+        <span class="badge bg-secondary ms-1">Admin</span></h5>
+      <p class="text-muted small">System-wide and shared by all users: the sender account
+        all app email is sent from, and when the daily reminder check runs.</p>
+      <form method="post">
+        <input type="hidden" name="section" value="email_config">
+        <div class="mb-3">
+          <label class="form-label">Sender Gmail Address (from)</label>
           <input name="gmail_user" type="email" class="form-control"
                  value="{{ cfg.gmail_user }}" placeholder="you@gmail.com">
         </div>
@@ -19,54 +49,115 @@
           <input name="gmail_password" type="password" class="form-control" placeholder="Leave blank to keep current">
           <div class="form-text">
             Use a <a href="https://myaccount.google.com/apppasswords" target="_blank">Gmail App Password</a>,
-            not your regular password. Requires 2-Step Verification to be enabled on your Google account.
+            not your regular password (requires 2-Step Verification).
           </div>
         </div>
-        <div class="mb-3">
-          <label class="form-label">Daily Check Time (hour, 0–23)</label>
-          <input name="reminder_hour" type="number" min="0" max="23" class="form-control"
-                 value="{{ cfg.reminder_hour }}" style="max-width:100px;">
-          <div class="form-text">
-            Reminders are checked once per day at this hour (server local time).
-            The app must be running for scheduled emails to fire.
+        <div class="row g-3">
+          <div class="col-sm-4">
+            <label class="form-label">Daily Check Time</label>
+            <input name="reminder_hour" type="number" min="0" max="23" class="form-control"
+                   value="{{ cfg.reminder_hour }}">
+            <div class="form-text">Hour 0–23.</div>
+          </div>
+          <div class="col-sm-8">
+            <label class="form-label">Timezone</label>
+            {% set zones = ['America/New_York','America/Chicago','America/Denver','America/Phoenix','America/Los_Angeles','America/Anchorage','Pacific/Honolulu','UTC'] %}
+            <select name="reminder_tz" class="form-select">
+              {% if cfg.reminder_tz not in zones %}<option value="{{ cfg.reminder_tz }}" selected>{{ cfg.reminder_tz }}</option>{% endif %}
+              {% for z in zones %}
+                <option value="{{ z }}" {% if z == cfg.reminder_tz %}selected{% endif %}>{{ z }}</option>
+              {% endfor %}
+            </select>
+            <div class="form-text">The check time is interpreted in this zone.</div>
           </div>
         </div>
-        <button class="btn btn-primary">Save Settings</button>
+        <button class="btn btn-primary mt-3">Save Email Settings</button>
       </form>
     </div>
+
+    <!-- Self sign-up (admin only) -->
+    <div class="card p-4 mb-4">
+      <h5 class="mb-3"><i class="bi bi-person-plus me-2"></i>Self Sign-up
+        <span class="badge bg-secondary ms-1">Admin</span></h5>
+      <p class="text-muted small">
+        When open, anyone who reaches the sign-in page can create their own account —
+        no invite needed. Turn it off once your friends &amp; family have joined to keep
+        registration closed.
+      </p>
+      <form method="post">
+        <input type="hidden" name="section" value="signup">
+        <div class="form-check form-switch">
+          <input type="checkbox" name="signup_open" value="1" id="signupOpen"
+                 class="form-check-input" {% if cfg.signup_open %}checked{% endif %}>
+          <label class="form-check-label" for="signupOpen">Allow anyone to sign up</label>
+        </div>
+        <button class="btn btn-primary mt-3">Save Sign-up Settings</button>
+      </form>
+    </div>
+    {% endif %}
   </div>
 
   <div class="col-lg-5">
-    <div class="card p-4">
-      <h5 class="mb-3"><i class="bi bi-envelope-paper me-2"></i>Send Test Summary</h5>
+
+    <!-- Send a summary now (every user) -->
+    <div class="card p-4 mb-4">
+      <h5 class="mb-3"><i class="bi bi-envelope-paper me-2"></i>Send Me a Summary Now</h5>
       <p class="text-muted small">
-        Send a summary of <em>your</em> outstanding benefits to an override address —
-        useful for verifying SMTP is set up correctly without touching other users.
-        Subscription benefits and fully-used credits are excluded.
-        Other users send their own summary via <a href="{{ url_for('preferences') }}">Preferences</a>.
+        Email yourself an immediate summary of every outstanding benefit across your
+        active cards. Subscription benefits and fully-used credits are skipped.
       </p>
       <form method="post" action="{{ url_for('send_summary') }}">
+        {% if g.user.is_admin %}
         <div class="mb-3">
-          <label class="form-label">Override recipient</label>
+          <label class="form-label">Override recipient
+            <span class="text-muted">(admin SMTP test, optional)</span></label>
           <input name="test_recipient" type="email" class="form-control"
-                 placeholder="override@example.com" required>
-          <div class="form-text">The email is sent only to this address.</div>
+                 placeholder="leave blank to send to yourself">
+          <div class="form-text">If set, the email goes only to this address.</div>
         </div>
+        {% endif %}
         <button class="btn btn-outline-primary">
-          <i class="bi bi-send me-1"></i>Send Test Summary
+          <i class="bi bi-send me-1"></i>Send Now
         </button>
       </form>
     </div>
 
-    <div class="card p-4 mt-4">
-      <h5 class="mb-3"><i class="bi bi-info-circle me-2"></i>How Reminders Work</h5>
+    <!-- Change password (every user) -->
+    <div class="card p-4 mb-4">
+      <h5 class="mb-3"><i class="bi bi-shield-lock me-2"></i>Change Password</h5>
+      <form method="post" action="{{ url_for('change_password') }}">
+        <div class="mb-3">
+          <label class="form-label">Current password</label>
+          <input name="current_password" type="password" class="form-control"
+                 autocomplete="current-password" required>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">New password</label>
+          <input name="new_password" type="password" class="form-control"
+                 autocomplete="new-password" required minlength="8">
+          <div class="form-text">At least 8 characters.</div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Confirm new password</label>
+          <input name="confirm_password" type="password" class="form-control"
+                 autocomplete="new-password" required minlength="8">
+        </div>
+        <button class="btn btn-primary">Update password</button>
+      </form>
+    </div>
+
+    {% if g.user.is_admin %}
+    <div class="card p-4">
+      <h5 class="mb-3"><i class="bi bi-info-circle me-2"></i>How Reminders Work
+        <span class="badge bg-secondary ms-1">Admin</span></h5>
       <ul class="small text-muted mb-0">
-        <li class="mb-1">Each benefit can have one or more reminder triggers (e.g., 7 days, 3 days, 1 day before period end).</li>
-        <li class="mb-1">An email is sent to each user's notification address when today matches a trigger <em>and</em> they still have unused credit on that benefit.</li>
-        <li class="mb-1">Users can turn reminders off entirely from their Preferences page.</li>
+        <li class="mb-1">Each benefit has its own reminder triggers (e.g. 7/3/1 days before period end), set per user from the benefit's page.</li>
+        <li class="mb-1">An email goes to each user's notification address when today matches a trigger <em>and</em> they still have unused credit on that benefit.</li>
+        <li class="mb-1">Users opt out of a benefit via its <em>Ignore</em> toggle — there's no global off-switch.</li>
         <li>Each trigger fires at most once per user per period.</li>
       </ul>
     </div>
+    {% endif %}
   </div>
 </div>
 

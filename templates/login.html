@@ -22,6 +22,11 @@
       <div class="mt-3 text-center">
         <a href="{{ url_for('forgot_password') }}" class="small text-muted">Forgot password?</a>
       </div>
+      {% if signup_enabled %}
+      <div class="mt-2 text-center small text-muted">
+        New here? <a href="{{ url_for('signup') }}">Create an account</a>
+      </div>
+      {% endif %}
     </div>
   </div>
 </div>
