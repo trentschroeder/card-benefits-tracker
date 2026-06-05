@@ -2,6 +2,46 @@
 {% block title %}Offers — Card Benefits{% endblock %}
 {% block content %}
 
+<style>
+  /* Offer cards: side-by-side on desktop, stacked + full-width on mobile so a
+     few offers fill the screen comfortably with finger-friendly tap targets. */
+  .offers-page .offer-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: .75rem;
+  }
+  .offers-page .offer-actions {
+    display: flex;
+    flex-direction: column;
+    gap: .5rem;
+    align-items: flex-end;
+    white-space: nowrap;
+  }
+  .offers-page .offer-actions-secondary { display: flex; gap: .5rem; }
+  .offers-page .offer-progress { max-width: 320px; }
+
+  @media (max-width: 768px) {
+    .offers-page .offer-card { padding: 1.1rem 1.15rem !important; }
+    .offers-page .offer-row { flex-direction: column; gap: 1rem; }
+    .offers-page .offer-name { font-size: 1.08rem; }
+    .offers-page .offer-meta { font-size: .92rem; row-gap: .35rem !important; }
+    .offers-page .offer-progress { max-width: none; height: 8px !important; }
+    /* Action row spans the full width: a big primary button + icon buttons. */
+    .offers-page .offer-actions {
+      flex-direction: row;
+      width: 100%;
+      align-items: stretch;
+      gap: .6rem;
+    }
+    .offers-page .offer-actions > .offer-redeem { flex: 1 1 auto; min-height: 48px; }
+    .offers-page .offer-actions-secondary { flex: 0 0 auto; }
+    .offers-page .offer-actions-secondary .btn { width: 52px; min-height: 48px; }
+  }
+</style>
+
+<div class="offers-page">
+
 <div class="d-flex justify-content-between align-items-center mb-3">
   <h2 class="mb-0"><i class="bi bi-tag-fill me-2"></i>Offers</h2>
   <a href="{{ url_for('offer_new') }}" class="btn btn-primary btn-sm">
@@ -23,11 +63,11 @@
 {% endif %}
 
 {% for o in offers %}
-<div class="card p-3 mb-3">
-  <div class="d-flex justify-content-between align-items-start gap-2">
-    <div class="flex-grow-1">
+<div class="card p-3 mb-3 offer-card">
+  <div class="offer-row">
+    <div class="offer-info flex-grow-1">
       <div class="d-flex align-items-center flex-wrap gap-2">
-        <span class="fw-semibold">{{ o.name }}</span>
+        <span class="fw-semibold offer-name">{{ o.name }}</span>
         {% if o.expiration_date %}
           {% if o.expired %}
             <span class="badge bg-danger">Expired</span>
@@ -42,7 +82,7 @@
       </div>
       {% if o.description %}<div class="text-muted small mt-1">{{ o.description }}</div>{% endif %}
 
-      <div class="text-muted small mt-2 d-flex flex-wrap gap-3">
+      <div class="text-muted small mt-2 d-flex flex-wrap gap-3 offer-meta">
         {% if o.amount is not none %}
           <span><i class="bi bi-cash-coin me-1"></i>${{ '%.2f' | format(o.remaining) }} of ${{ '%.2f' | format(o.amount) }} left</span>
         {% endif %}
@@ -55,22 +95,22 @@
       </div>
 
       {% if o.amount is not none %}
-      <div class="progress mt-2" style="height:6px; max-width:320px;">
+      <div class="progress mt-2 offer-progress" style="height:6px;">
         <div class="progress-bar {{ 'bg-success' if o.pct_used >= 60 else 'bg-warning' }}"
              role="progressbar" style="width: {{ o.pct_used }}%;"></div>
       </div>
       {% endif %}
     </div>
 
-    <div class="d-flex flex-column gap-2 align-items-end" style="white-space:nowrap;">
-      <button type="button" class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#redeemModal{{ o.id }}">
+    <div class="offer-actions">
+      <button type="button" class="btn btn-primary btn-sm offer-redeem" data-bs-toggle="modal" data-bs-target="#redeemModal{{ o.id }}">
         <i class="bi bi-check2-circle me-1"></i>{{ 'Redeem' if o.amount is not none else 'Mark used' }}
       </button>
-      <div class="d-flex gap-2">
-        <a href="{{ url_for('offer_edit', id=o.id) }}" class="btn btn-outline-secondary btn-sm" title="Edit">
+      <div class="offer-actions-secondary">
+        <a href="{{ url_for('offer_edit', id=o.id) }}" class="btn btn-outline-secondary btn-sm" title="Edit" aria-label="Edit offer">
           <i class="bi bi-pencil"></i>
         </a>
-        <button type="button" class="btn btn-outline-danger btn-sm" title="Delete"
+        <button type="button" class="btn btn-outline-danger btn-sm" title="Delete" aria-label="Delete offer"
                 data-bs-toggle="modal" data-bs-target="#deleteModal{{ o.id }}">
           <i class="bi bi-trash"></i>
         </button>
@@ -140,5 +180,7 @@
   </div>
 </div>
 {% endfor %}
+
+</div>{# /.offers-page #}
 
 {% endblock %}
