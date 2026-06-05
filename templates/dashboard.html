@@ -212,6 +212,26 @@
   }
   [data-theme="ai"] .roi-fee-tick { background: #7090c0; }
 
+  /* ── Desktop: two-column card grid ─────────────────────────
+     Masonry-style via CSS columns so cards of different heights pack
+     tightly. Applied (via the .wallet-grid class) only when there's more
+     than one card, so a lone card still spans the full width. */
+  @media (min-width: 992px) {
+    .wallet-grid { column-count: 2; column-gap: 1.5rem; }
+    .wallet-grid > .card-section {
+      break-inside: avoid;
+      -webkit-column-break-inside: avoid;
+      page-break-inside: avoid;
+    }
+  }
+  /* ── Desktop: let the usage bar absorb the row's dead space ──
+     Names keep a consistent width; the progress bar grows to fill the gap
+     between the name and the right-hand figures. (Mobile uses a grid.) */
+  @media (min-width: 769px) {
+    .row-name { flex: 0 1 220px; }
+    .row-bar-wrap { flex: 1 1 0; width: auto; min-width: 90px; }
+  }
+
   /* ── Mobile: iOS-native 2-line cells ────────────────────
      Each benefit row becomes a roomy cell with name on top,
      "period · amount · days-badge" subtitle underneath, and a
@@ -400,6 +420,7 @@
 </div>
 {% endif %}
 
+<div class="{% if dashboard_cards|length > 1 %}wallet-grid{% endif %}">
 {% for dc in dashboard_cards %}
 {% set card = dc.card %}
 {% set uc   = dc.user_card_id %}
@@ -597,8 +618,13 @@
 
   </div>{# /card-body #}
 </div>
+{% endfor %}
+</div>{# /wallet-grid #}
 
-<!-- Redeem modals for this card -->
+<!-- Redeem modals — kept outside the card grid so they don't disrupt its columns -->
+{% for dc in dashboard_cards %}
+{% set uc = dc.user_card_id %}
+{% set pending = dc.benefits | selectattr('fully_used', 'false') | list %}
 {% for b in pending %}
 <div class="modal fade" id="redeemModal{{ uc }}-{{ b.id }}" tabindex="-1">
   <div class="modal-dialog modal-sm">
