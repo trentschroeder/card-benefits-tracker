@@ -46,6 +46,27 @@
       <div class="form-text">Periods align to the calendar (monthly = 1st of month; quarterly = Jan/Apr/Jul/Oct; semi-annual = Jan/Jul; annual = Jan–Dec).</div>
     </div>
     <div class="mb-3">
+      <label class="form-label d-block mb-1"><i class="bi bi-bell me-1"></i>Default email reminders</label>
+      <div class="form-text mb-2">
+        Copied to anyone who adds this card — they can change or remove them on
+        their own card afterward. Options depend on the renewal period.
+      </div>
+      <div class="d-flex flex-wrap gap-3" id="reminderChoices">
+        {% for days in all_reminder_days %}
+        <div class="form-check reminder-choice" data-days="{{ days }}">
+          <input type="checkbox" name="reminder_days" value="{{ days }}" id="rem{{ days }}"
+                 class="form-check-input" {% if days in selected_days %}checked{% endif %}>
+          <label class="form-check-label" for="rem{{ days }}">{{ days }} day{{ 's' if days != 1 }}</label>
+        </div>
+        {% endfor %}
+      </div>
+      <div class="mt-2 d-flex align-items-center gap-2">
+        <input name="custom_reminder_day" type="number" min="1" class="form-control form-control-sm"
+               style="width:90px;" placeholder="Other" id="customReminderDay">
+        <span class="small text-muted" id="customMaxHint">days before period end</span>
+      </div>
+    </div>
+    <div class="mb-3">
       <div class="form-check form-switch">
         <input name="is_subscription" type="checkbox" class="form-check-input" id="isSubscription"
                role="switch" {% if form.get('is_subscription') %}checked{% endif %}>
@@ -98,4 +119,47 @@
 </div>
 {% endif %}
 
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function() {
+  var CHOICES  = {{ reminder_day_choices_json | safe }};
+  var DEFAULTS = {{ default_reminder_days_json | safe }};
+  var MAXES    = {{ reminder_custom_max_json | safe }};
+  var IS_NEW   = {{ 'true' if not benefit else 'false' }};
+  var periodSel = document.querySelector('select[name="period_type"]');
+  var custom    = document.getElementById('customReminderDay');
+  var hint      = document.getElementById('customMaxHint');
+  if (!periodSel) return;
+
+  function refresh(applyDefaults) {
+    var p = periodSel.value;
+    var valid = CHOICES[p] || [];
+    document.querySelectorAll('.reminder-choice').forEach(function(el) {
+      var d  = parseInt(el.dataset.days, 10);
+      var cb = el.querySelector('input');
+      if (valid.indexOf(d) === -1) {
+        el.style.display = 'none';
+        cb.checked = false;            // never submit a day invalid for the period
+      } else {
+        el.style.display = '';
+        if (applyDefaults) {
+          cb.checked = (DEFAULTS[p] || []).indexOf(d) !== -1;
+        }
+      }
+    });
+    if (custom) {
+      var m = MAXES[p] || 364;
+      custom.max = m;
+      hint.textContent = 'days before period end (max ' + m + ')';
+    }
+  }
+
+  // Re-apply a period's defaults on change only when creating a new benefit;
+  // when editing, preserve the admin's saved selections.
+  periodSel.addEventListener('change', function() { refresh(IS_NEW); });
+  refresh(false);  // initial load: gate visibility, keep server-rendered checks
+})();
+</script>
 {% endblock %}

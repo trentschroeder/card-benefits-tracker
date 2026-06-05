@@ -108,6 +108,17 @@ CREATE TABLE IF NOT EXISTS reminders (
     FOREIGN KEY (benefit_id)   REFERENCES benefits(id)   ON DELETE CASCADE
 );
 
+-- Template-level reminder defaults: when a user adds a card, each active
+-- benefit's default reminders are copied into the per-instance reminders table
+-- so the user starts with a sensible schedule they can then tweak.
+CREATE TABLE IF NOT EXISTS benefit_default_reminders (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    benefit_id   INTEGER NOT NULL,
+    days_before  INTEGER NOT NULL,
+    UNIQUE(benefit_id, days_before),
+    FOREIGN KEY (benefit_id) REFERENCES benefits(id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS redemptions (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     user_card_id INTEGER NOT NULL,
@@ -138,6 +149,7 @@ CREATE TABLE IF NOT EXISTS settings (
 );
 
 CREATE INDEX IF NOT EXISTS idx_benefits_card   ON benefits(card_id);
+CREATE INDEX IF NOT EXISTS idx_benefit_default_reminders ON benefit_default_reminders(benefit_id);
 CREATE INDEX IF NOT EXISTS idx_user_cards_user ON user_cards(user_id, active);
 -- Indexes on the per-instance tables (redemptions/reminders/sent_reminders)
 -- are created by _ensure_user_scoped_indexes after the migration finishes,

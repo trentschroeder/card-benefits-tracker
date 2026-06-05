@@ -1,4 +1,5 @@
 import hashlib
+import json
 import os
 import secrets
 import sqlite3
@@ -158,7 +159,36 @@ def init_db():
     _migrate_scope_data_to_users(db)
     _migrate_to_per_user_card(db)
     _ensure_user_scoped_indexes(db)
+    _backfill_benefit_default_reminders(db)
     db.close()
+
+
+def _backfill_benefit_default_reminders(db):
+    """One-time: give every catalog benefit that has no default reminders a
+    sensible schedule based on its period. Guarded by a settings flag so it
+    runs once and never overwrites an admin who later clears the defaults."""
+    try:
+        done = db.execute(
+            "SELECT value FROM settings WHERE key = 'benefit_default_reminders_backfilled'"
+        ).fetchone()
+        if done:
+            return
+        for b in db.execute('SELECT id, period_type FROM benefits').fetchall():
+            has = db.execute(
+                'SELECT 1 FROM benefit_default_reminders WHERE benefit_id = ? LIMIT 1',
+                (b['id'],)).fetchone()
+            if has:
+                continue
+            for d in _DEFAULT_REMINDER_DAYS.get(b['period_type'], []):
+                db.execute(
+                    'INSERT OR IGNORE INTO benefit_default_reminders (benefit_id, days_before) '
+                    'VALUES (?, ?)', (b['id'], d))
+        db.execute(
+            "INSERT OR REPLACE INTO settings (key, value) "
+            "VALUES ('benefit_default_reminders_backfilled', '1')")
+        db.commit()
+    except Exception:
+        pass
 
 
 def _ensure_user_scoped_indexes(db):
@@ -195,7 +225,9 @@ def _migrate_scope_data_to_users(db):
 
 def _migrate_redemptions_add_user_id(db, admin_id):
     cols = {r[1] for r in db.execute('PRAGMA table_info(redemptions)').fetchall()}
-    if 'user_id' in cols:
+    if 'user_id' in cols or 'user_card_id' in cols:
+        # Already at Phase 2 (user_id) or advanced to Phase 10 (user_card_id);
+        # re-running would collapse per-instance rows and collide.
         return
     # SQLite can't add a NOT NULL column without a default; add nullable, backfill,
     # then rebuild the table to enforce NOT NULL + FK.
@@ -230,7 +262,9 @@ def _migrate_redemptions_add_user_id(db, admin_id):
 
 def _migrate_reminders_to_per_user(db, admin_id):
     cols = {r[1] for r in db.execute('PRAGMA table_info(reminders)').fetchall()}
-    if 'user_id' in cols:
+    if 'user_id' in cols or 'user_card_id' in cols:
+        # Already at Phase 2 (user_id) or advanced to Phase 10 (user_card_id);
+        # re-running would collapse per-instance rows and collide.
         return
     db.commit()
     db.execute('PRAGMA foreign_keys = OFF')
@@ -259,7 +293,9 @@ def _migrate_reminders_to_per_user(db, admin_id):
 
 def _migrate_sent_reminders_to_per_user(db, admin_id):
     cols = {r[1] for r in db.execute('PRAGMA table_info(sent_reminders)').fetchall()}
-    if 'user_id' in cols:
+    if 'user_id' in cols or 'user_card_id' in cols:
+        # Already at Phase 2 (user_id) or advanced to Phase 10 (user_card_id);
+        # re-running would collapse per-instance rows and collide.
         return
     db.commit()
     db.execute('PRAGMA foreign_keys = OFF')
@@ -640,6 +676,50 @@ _REMINDER_DAY_CHOICES = {
     'annual':      [1, 3, 7, 14, 30, 60, 90],
 }
 _REMINDER_CUSTOM_MAX = {'monthly': 27, 'quarterly': 88, 'semi-annual': 178, 'annual': 364}
+
+# Logical default reminder schedule per period, pre-configured on catalog
+# benefits and copied to a user's instance when they add the card. Two nudges
+# for longer periods (an early heads-up plus a final reminder), one for monthly.
+_DEFAULT_REMINDER_DAYS = {
+    'monthly':     [3],
+    'quarterly':   [14, 3],
+    'semi-annual': [30, 7],
+    'annual':      [60, 14],
+}
+# Full union of offered reminder-day checkboxes; the catalog form's JS narrows
+# this to the valid set for the selected period.
+_ALL_REMINDER_DAYS = [1, 3, 7, 14, 30, 60, 90]
+
+
+def _parse_reminder_days(form, period_type):
+    """Read the reminder_days checkboxes + custom field from a submitted form,
+    keeping only positive ints that fit inside the period."""
+    max_d = _REMINDER_CUSTOM_MAX.get(period_type, 364)
+    days = set()
+    for raw in list(form.getlist('reminder_days')) + [form.get('custom_reminder_day', '')]:
+        raw = (raw or '').strip()
+        if not raw:
+            continue
+        try:
+            n = int(raw)
+        except ValueError:
+            continue
+        if 1 <= n <= max_d:
+            days.add(n)
+    return sorted(days)
+
+
+def _benefit_reminder_ctx(selected_days):
+    """Template context for the default-reminder controls on the catalog
+    benefit form: which days are checked plus the JSON the form's JS needs to
+    gate options/defaults by period."""
+    return dict(
+        selected_days=selected_days,
+        all_reminder_days=_ALL_REMINDER_DAYS,
+        reminder_day_choices_json=json.dumps(_REMINDER_DAY_CHOICES),
+        default_reminder_days_json=json.dumps(_DEFAULT_REMINDER_DAYS),
+        reminder_custom_max_json=json.dumps(_REMINDER_CUSTOM_MAX),
+    )
 
 
 def compute_card_roi(db, enriched_benefits, user_card_id):
@@ -1295,10 +1375,26 @@ def card_templates_add(card_id):
         'INSERT INTO user_cards (user_id, card_id, active, nickname) VALUES (?, ?, 1, ?)',
         (uid, card_id, nickname))
     new_uc_id = cur.lastrowid
+    # Seed the new instance with each active benefit's default reminders so the
+    # user starts with a sensible schedule instead of a blank slate.
+    seeded = db.execute('''
+        SELECT bdr.benefit_id, bdr.days_before
+        FROM benefit_default_reminders bdr
+        JOIN benefits b ON b.id = bdr.benefit_id
+        WHERE b.card_id = ? AND b.active = 1
+    ''', (card_id,)).fetchall()
+    for r in seeded:
+        db.execute(
+            'INSERT OR IGNORE INTO reminders (user_card_id, benefit_id, days_before) '
+            'VALUES (?, ?, ?)', (new_uc_id, r['benefit_id'], r['days_before']))
     db.commit()
     db.close()
     label = nickname or card['name']
-    flash(f'Added "{label}" to your dashboard.', 'success')
+    if seeded:
+        flash(f'Added "{label}" to your dashboard with default reminders — '
+              'adjust them on each benefit.', 'success')
+    else:
+        flash(f'Added "{label}" to your dashboard.', 'success')
     return redirect(url_for('card_detail', id=new_uc_id))
 
 
@@ -1702,13 +1798,14 @@ def benefit_new(card_id):
         credit_amount      = request.form.get('credit_amount', '').strip() or None
         period_type        = request.form.get('period_type', 'monthly')
         is_subscription    = 1 if request.form.get('is_subscription') else 0
-        reminder_days      = request.form.getlist('reminder_days')
+        default_days       = _parse_reminder_days(request.form, period_type)
 
         if not name:
             flash('Name is required.', 'danger')
             db.close()
             return render_template('admin_catalog_benefit.html', card=card, form=request.form,
-                                   benefit=None, period_labels=PERIOD_LABELS)
+                                   benefit=None, period_labels=PERIOD_LABELS,
+                                   **_benefit_reminder_ctx(default_days))
 
         if credit_amount:
             try:
@@ -1717,34 +1814,29 @@ def benefit_new(card_id):
                 flash('Credit amount must be a number.', 'danger')
                 db.close()
                 return render_template('admin_catalog_benefit.html', card=card, form=request.form,
-                                       benefit=None, period_labels=PERIOD_LABELS)
+                                       benefit=None, period_labels=PERIOD_LABELS,
+                                       **_benefit_reminder_ctx(default_days))
 
         cur = db.execute(
             'INSERT INTO benefits (card_id, name, description, credit_amount, period_type, is_subscription) '
             'VALUES (?, ?, ?, ?, ?, ?)',
             (card_id, name, description, credit_amount, period_type, is_subscription))
         bid = cur.lastrowid
-        # Admin's per-instance reminder defaults are applied to every user_cards
-        # row admin has for this card (typically just one).
+        # Persist the template-level default reminders for this benefit; these
+        # are copied to each user's instance when they add the card.
+        for d in default_days:
+            db.execute(
+                'INSERT OR IGNORE INTO benefit_default_reminders (benefit_id, days_before) '
+                'VALUES (?, ?)', (bid, d))
+        # Also apply them to any instances the admin already holds of this card.
         my_ucs = [r['id'] for r in db.execute(
             'SELECT id FROM user_cards WHERE user_id = ? AND card_id = ?',
             (g.user['id'], card_id)).fetchall()]
-        custom_day = request.form.get('custom_reminder_day', '').strip()
         for my_uc_id in my_ucs:
-            for d in reminder_days:
-                try:
-                    db.execute(
-                        'INSERT OR IGNORE INTO reminders (user_card_id, benefit_id, days_before) VALUES (?, ?, ?)',
-                        (my_uc_id, bid, int(d)))
-                except ValueError:
-                    pass
-            if custom_day:
-                try:
-                    db.execute(
-                        'INSERT OR IGNORE INTO reminders (user_card_id, benefit_id, days_before) VALUES (?, ?, ?)',
-                        (my_uc_id, bid, int(custom_day)))
-                except ValueError:
-                    pass
+            for d in default_days:
+                db.execute(
+                    'INSERT OR IGNORE INTO reminders (user_card_id, benefit_id, days_before) '
+                    'VALUES (?, ?, ?)', (my_uc_id, bid, d))
 
         db.commit()
         db.close()
@@ -1753,14 +1845,16 @@ def benefit_new(card_id):
 
     db.close()
     return render_template('admin_catalog_benefit.html', card=card, form={},
-                           benefit=None, period_labels=PERIOD_LABELS)
+                           benefit=None, period_labels=PERIOD_LABELS,
+                           **_benefit_reminder_ctx(_DEFAULT_REMINDER_DAYS['monthly']))
 
 
 @app.route('/admin-cards/<int:card_id>/benefits/<int:bid>/edit', methods=['GET', 'POST'])
 @admin_required
 def catalog_benefit_edit(card_id, bid):
-    """Admin-only catalog edit for a benefit. No reminder controls here —
-    those live on each user_cards instance via instance_benefit_edit."""
+    """Admin-only catalog edit for a benefit, including its template-level
+    default reminders. Editing the defaults only affects future adds — it does
+    not rewrite reminders users have already set on their own instances."""
     db   = get_db()
     card = db.execute('SELECT * FROM cards WHERE id = ?', (card_id,)).fetchone()
     b    = db.execute('SELECT * FROM benefits WHERE id = ? AND card_id = ?',
@@ -1777,11 +1871,13 @@ def catalog_benefit_edit(card_id, bid):
         period_type     = request.form.get('period_type', 'monthly')
         is_subscription = 1 if request.form.get('is_subscription') else 0
         active          = 1 if request.form.get('active') else 0
+        default_days    = _parse_reminder_days(request.form, period_type)
         if not name:
             flash('Name is required.', 'danger')
             db.close()
             return render_template('admin_catalog_benefit.html', card=card, form=request.form,
-                                   benefit=b, period_labels=PERIOD_LABELS)
+                                   benefit=b, period_labels=PERIOD_LABELS,
+                                   **_benefit_reminder_ctx(default_days))
         if credit_amount:
             try:
                 credit_amount = float(credit_amount)
@@ -1789,19 +1885,30 @@ def catalog_benefit_edit(card_id, bid):
                 flash('Credit amount must be a number.', 'danger')
                 db.close()
                 return render_template('admin_catalog_benefit.html', card=card, form=request.form,
-                                       benefit=b, period_labels=PERIOD_LABELS)
+                                       benefit=b, period_labels=PERIOD_LABELS,
+                                       **_benefit_reminder_ctx(default_days))
         db.execute(
             'UPDATE benefits SET name=?, description=?, credit_amount=?, period_type=?, is_subscription=?, '
             'active=? WHERE id=?',
             (name, description, credit_amount, period_type, is_subscription, active, bid))
+        # Replace this benefit's default reminders with the submitted set.
+        db.execute('DELETE FROM benefit_default_reminders WHERE benefit_id = ?', (bid,))
+        for d in default_days:
+            db.execute(
+                'INSERT OR IGNORE INTO benefit_default_reminders (benefit_id, days_before) '
+                'VALUES (?, ?)', (bid, d))
         db.commit()
         db.close()
         flash(f'Benefit "{name}" updated.', 'success')
         return redirect(url_for('catalog_card_edit', card_id=card_id))
 
+    saved_days = [r['days_before'] for r in db.execute(
+        'SELECT days_before FROM benefit_default_reminders WHERE benefit_id = ? ORDER BY days_before',
+        (bid,)).fetchall()]
     db.close()
     return render_template('admin_catalog_benefit.html', card=card, form=dict(b),
-                           benefit=b, period_labels=PERIOD_LABELS)
+                           benefit=b, period_labels=PERIOD_LABELS,
+                           **_benefit_reminder_ctx(saved_days))
 
 
 @app.route('/admin-cards/<int:card_id>/benefits/<int:bid>/delete', methods=['POST'])
