@@ -795,27 +795,15 @@
   {% block content %}{% endblock %}
 </div>
 
-<!-- iOS-style bottom tab bar (mobile only — desktop hides via CSS) -->
+<!-- iOS-style bottom tab bar (mobile only — desktop hides via CSS).
+     Admin tabs (Templates, Users) are intentionally omitted: mobile users,
+     admin or not, only get the non-admin navigation. -->
 <nav class="mobile-tabbar" role="navigation" aria-label="Primary">
   <a class="tab-item {% if request.path == '/' %}active{% endif %}"
      href="{{ url_for('dashboard') }}">
     <i class="bi bi-speedometer2"></i>
     <span>Dashboard</span>
   </a>
-  {% if g.user and g.user.is_admin %}
-  <a class="tab-item {% if request.path == '/card-templates' %}active{% endif %}"
-     href="{{ url_for('card_templates') }}">
-    <i class="bi bi-collection"></i>
-    <span>Templates</span>
-  </a>
-  {% endif %}
-  {% if g.user and g.user.is_admin %}
-  <a class="tab-item {% if request.path.startswith('/users') %}active{% endif %}"
-     href="{{ url_for('users_list') }}">
-    <i class="bi bi-people"></i>
-    <span>Users</span>
-  </a>
-  {% endif %}
   {% if g.user %}
   <a class="tab-item {% if request.path == '/settings' %}active{% endif %}"
      href="{{ url_for('settings') }}">
