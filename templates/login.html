@@ -9,6 +9,7 @@
         <div class="alert alert-danger">{{ error }}</div>
       {% endif %}
       <form method="post">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <div class="mb-3">
           <label class="form-label">Email</label>
           <input name="email" type="email" class="form-control" autocomplete="email" autofocus required>

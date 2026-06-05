@@ -133,6 +133,7 @@
         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
       </div>
       <form method="post" action="{{ url_for('card_share', id=card.user_card_id) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <div class="modal-body">
           <p class="text-muted small mb-3">
             Invite an existing user to pool redemptions on <strong>{{ card.display_name }}</strong>.
@@ -164,6 +165,7 @@
         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
       </div>
       <form method="post" action="{{ url_for('user_card_rename', id=card.user_card_id) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <div class="modal-body">
           <p class="text-muted small mb-3">
             Give this specific instance a nickname (e.g., "Personal Plat" vs "Business Plat").
@@ -197,6 +199,7 @@
       <div class="modal-footer">
         <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
         <form method="post" action="{{ url_for('card_remove', id=card.user_card_id) }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <button class="btn btn-primary btn-sm">Remove</button>
         </form>
       </div>

@@ -15,6 +15,7 @@
 
 <div class="card p-4 mb-4">
   <form method="post">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <div class="mb-3">
       <label class="form-label">Benefit Name <span class="text-danger">*</span></label>
       <input name="name" type="text" class="form-control"
@@ -111,6 +112,7 @@
       <div class="modal-footer">
         <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
         <form method="post" action="{{ url_for('catalog_benefit_delete', card_id=card.id, bid=benefit.id) }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <button class="btn btn-danger btn-sm">Delete</button>
         </form>
       </div>

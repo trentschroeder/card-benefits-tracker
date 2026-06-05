@@ -1,4 +1,5 @@
 import hashlib
+import hmac
 import json
 import os
 import secrets
@@ -37,6 +38,41 @@ def _load_secret():
 
 app.secret_key = _load_secret()
 app.permanent_session_lifetime = timedelta(days=90)
+# Session-cookie hardening. The site is HTTPS-only (nginx redirects :80 → :443),
+# so Secure is safe; SameSite=Lax blocks cross-site form POSTs (CSRF defence).
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE='Lax',
+    SESSION_COOKIE_SECURE=True,
+)
+
+
+# ── CSRF protection ──────────────────────────────────────────────────────────
+# A per-session token must accompany every state-changing (POST) request. All
+# such requests in this app are HTML form posts (no AJAX), so the token rides in
+# a hidden `csrf_token` field rendered via the csrf_token() template global.
+def _ensure_csrf_token():
+    token = session.get('_csrf_token')
+    if not token:
+        token = secrets.token_urlsafe(32)
+        session['_csrf_token'] = token
+    return token
+
+
+@app.context_processor
+def _inject_csrf_token():
+    return {'csrf_token': _ensure_csrf_token}
+
+
+@app.before_request
+def _csrf_protect():
+    if request.method in ('GET', 'HEAD', 'OPTIONS', 'TRACE'):
+        return
+    submitted = request.form.get('csrf_token', '')
+    expected  = session.get('_csrf_token', '')
+    if not expected or not hmac.compare_digest(str(submitted), str(expected)):
+        flash('Your session expired or the form was invalid — please try again.', 'danger')
+        return redirect(request.referrer or url_for('dashboard'))
 
 
 def login_required(f):
@@ -821,7 +857,11 @@ def login():
                 session.clear()
                 session['user_id'] = row['id']
                 session.permanent = True
-                return redirect(request.args.get('next') or url_for('dashboard'))
+                # Only honour local relative paths in next= to avoid open redirect.
+                nxt = request.args.get('next', '')
+                if nxt.startswith('/') and not nxt.startswith('//'):
+                    return redirect(nxt)
+                return redirect(url_for('dashboard'))
         error = 'Invalid email or password.'
     db = get_db()
     signup_enabled = get_setting(db, 'signup_open', '0') == '1'
@@ -2668,4 +2708,8 @@ if os.environ.get('WERKZEUG_RUN_MAIN') != 'false_sentinel':  # always true, just
 # ── Entry point ────────────────────────────────────────────────────────────────
 
 if __name__ == '__main__':
+    # The local dev server is plain http, so a Secure-only session cookie would
+    # never round-trip. Production runs via gunicorn (app:app) and never reaches
+    # this block, so it keeps Secure cookies.
+    app.config['SESSION_COOKIE_SECURE'] = False
     app.run(debug=True, host='0.0.0.0', port=5001)

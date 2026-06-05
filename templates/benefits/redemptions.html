@@ -142,6 +142,7 @@
       <span class="text-muted ms-2" style="font-size:.8rem;">Only affects you on this card</span>
     </div>
     <form method="post" action="{{ url_for('instance_benefit_edit', uc_id=user_card_id, bid=benefit.id) }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <input type="hidden" name="next" value="{{ url_for('benefit_redemptions', id=benefit.id, uc=user_card_id) }}">
 
       <div class="row g-3">
@@ -265,6 +266,7 @@
               </button>
               <form method="post" action="{{ url_for('redemption_delete', id=r.id) }}"
                     onsubmit="return confirm('Remove this redemption?')">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <button class="btn btn-outline-danger btn-sm"><i class="bi bi-trash"></i></button>
               </form>
             </div>
@@ -288,6 +290,7 @@
         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
       </div>
       <form method="post" action="{{ url_for('redemption_edit', id=r.id) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <div class="modal-body">
           {% if benefit.credit_amount %}
           <div class="mb-3">
@@ -328,6 +331,7 @@
         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
       </div>
       <form method="post" action="{{ url_for('benefit_redeem', id=benefit.id) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <div class="modal-body">
           {% if benefit.is_subscription %}
           {% if benefit.credit_amount %}

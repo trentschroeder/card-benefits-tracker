@@ -11,6 +11,7 @@
     <div class="card p-4 mb-4">
       <h5 class="mb-3"><i class="bi bi-envelope me-2"></i>Email Notifications</h5>
       <form method="post">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <input type="hidden" name="section" value="profile">
         <div class="mb-3">
           <label class="form-label">Notification Email</label>
@@ -38,6 +39,7 @@
       <p class="text-muted small">System-wide and shared by all users: the sender account
         all app email is sent from, and when the daily reminder check runs.</p>
       <form method="post">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <input type="hidden" name="section" value="email_config">
         <div class="mb-3">
           <label class="form-label">Sender Gmail Address (from)</label>
@@ -85,6 +87,7 @@
         registration closed.
       </p>
       <form method="post">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <input type="hidden" name="section" value="signup">
         <div class="form-check form-switch">
           <input type="checkbox" name="signup_open" value="1" id="signupOpen"
@@ -107,6 +110,7 @@
         active cards. Subscription benefits and fully-used credits are skipped.
       </p>
       <form method="post" action="{{ url_for('send_summary') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         {% if g.user.is_admin %}
         <div class="mb-3">
           <label class="form-label">Override recipient
@@ -126,6 +130,7 @@
     <div class="card p-4 mb-4">
       <h5 class="mb-3"><i class="bi bi-shield-lock me-2"></i>Change Password</h5>
       <form method="post" action="{{ url_for('change_password') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <div class="mb-3">
           <label class="form-label">Current password</label>
           <input name="current_password" type="password" class="form-control"

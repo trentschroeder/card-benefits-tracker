@@ -42,6 +42,7 @@
                 <div class="d-flex gap-1 justify-content-end">
                   {% if u.status in ('pending', 'expired') %}
                   <form method="post" action="{{ url_for('user_resend_invite', id=u.id) }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <button class="btn btn-outline-primary btn-sm" title="Resend invitation">
                       <i class="bi bi-envelope-arrow-up"></i>
                     </button>
@@ -49,6 +50,7 @@
                   {% endif %}
                   {% if u.id != g.user.id and u.status == 'active' %}
                   <form method="post" action="{{ url_for('user_impersonate', id=u.id) }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <button class="btn btn-outline-secondary btn-sm" title="Act as this user">
                       <i class="bi bi-incognito"></i>
                     </button>
@@ -80,6 +82,7 @@
         The link expires in {{ 7 }} days.
       </p>
       <form method="post" action="{{ url_for('user_new') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <div class="mb-3">
           <label class="form-label">Email</label>
           <input name="email" type="email" class="form-control" required placeholder="friend@example.com">
@@ -111,6 +114,7 @@
       <div class="modal-footer">
         <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
         <form method="post" action="{{ url_for('user_delete', id=u.id) }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <button class="btn btn-danger btn-sm">Delete</button>
         </form>
       </div>

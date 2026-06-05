@@ -705,6 +705,7 @@
   <i class="bi bi-incognito me-2"></i>
   <span>Acting as <strong>{{ g.user.email }}</strong> (admin: {{ g.impersonator.email }})</span>
   <form method="post" action="{{ url_for('impersonate_stop') }}" class="d-inline ms-2">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <button class="btn btn-sm btn-light">
       <i class="bi bi-x-circle me-1"></i>Exit impersonation
     </button>

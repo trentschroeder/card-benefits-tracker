@@ -576,6 +576,7 @@
           {# Per-user opt-out: offer a resume action. Catalog-archived rows
              (b.active == 0) can only be re-enabled by admin via /admin-cards. #}
           <form method="post" action="{{ url_for('benefit_pursue_toggle', id=b.id, uc=uc) }}" class="row-action" style="margin:0;">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <button type="submit" class="btn btn-link btn-sm p-0" title="Stop ignoring">
               <i class="bi bi-arrow-counterclockwise"></i>
             </button>
@@ -607,6 +608,7 @@
         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
       </div>
       <form method="post" action="{{ url_for('benefit_redeem', id=b.id, uc=uc) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <div class="modal-body">
           {% if b.is_subscription %}
           {% if b.credit_amount %}
