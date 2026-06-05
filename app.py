@@ -13,9 +13,8 @@ from itsdangerous import URLSafeTimedSerializer, BadData
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from periods import get_current_period, days_left, PERIOD_LABELS
-from email_sender import (send_reminder_email, send_summary_email,
-                           send_invite_email, send_reset_email,
-                           send_share_invite_email)
+from email_sender import (send_reminder_email, send_invite_email,
+                           send_reset_email, send_share_invite_email)
 
 app = Flask(__name__)
 
@@ -2656,72 +2655,6 @@ def settings():
         }
     db.close()
     return render_template('settings.html', cfg=cfg)
-
-
-# ── Summary email ──────────────────────────────────────────────────────────────
-
-@app.route('/email/summary', methods=['POST'])
-@login_required
-def send_summary():
-    """Send a summary email of the current user's cards. Default recipient
-    is the user's notification_email (falling back to their login email).
-    Admin can override with a test_recipient form field for testing."""
-    db = get_db()
-    gmail_user = get_setting(db, 'gmail_user')
-    gmail_pass = get_setting(db, 'gmail_app_password')
-
-    if not all([gmail_user, gmail_pass]):
-        db.close()
-        flash('Gmail credentials are not configured. Ask the administrator to set them up.', 'danger')
-        return redirect(url_for('settings'))
-
-    uid       = g.user['id']
-    recipient = (g.user['notification_email'] or g.user['email'])
-    # Admin can override the destination for testing
-    test_recipient = request.form.get('test_recipient', '').strip() or None
-    if test_recipient and g.user['is_admin']:
-        recipient = test_recipient
-
-    user_cards = db.execute('''
-        SELECT uc.id AS user_card_id, uc.nickname, uc.card_id, c.name AS card_name
-        FROM user_cards uc
-        JOIN cards c ON c.id = uc.card_id
-        WHERE uc.user_id = ? AND uc.active = 1 AND c.active = 1
-        ORDER BY c.name, uc.id
-    ''', (uid,)).fetchall()
-
-    cards_data = []
-    for ucr in user_cards:
-        uc_id = ucr['user_card_id']
-        raw = db.execute('''
-            SELECT b.* FROM benefits b
-            LEFT JOIN user_benefits ub ON ub.benefit_id = b.id AND ub.user_card_id = ?
-            WHERE b.card_id = ? AND b.active = 1 AND COALESCE(ub.active, 1) = 1
-        ''', (uc_id, ucr['card_id'])).fetchall()
-        enriched = [enrich_benefit(db, b, uc_id) for b in raw]
-        pending  = [b for b in enriched if not b['fully_used'] and not b['is_subscription']]
-        pending.sort(key=lambda b: b['days_left'])
-        if pending:
-            display = ucr['nickname'] or ucr['card_name']
-            cards_data.append({'card_name': display, 'benefits': pending})
-
-    db.close()
-
-    back = url_for('settings')
-
-    if not cards_data:
-        flash('Nothing to send — all benefits are fully used or handled by subscription.', 'info')
-        return redirect(back)
-
-    try:
-        send_summary_email(gmail_user, gmail_pass, recipient, cards_data)
-        total = sum(len(c['benefits']) for c in cards_data)
-        label = 'Test summary' if (test_recipient and g.user['is_admin']) else 'Summary'
-        flash(f'{label} sent to {recipient} — {total} benefit(s) across {len(cards_data)} card(s).', 'success')
-    except Exception as e:
-        flash(f'Failed to send email: {e}', 'danger')
-
-    return redirect(back)
 
 
 @app.route('/email/test-reminder', methods=['POST'])
