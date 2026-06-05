@@ -684,15 +684,39 @@ def effective_user_card_ids(db, user_card_id):
     return members or [user_card_id]
 
 
-def enrich_benefit(db, benefit, user_card_id):
+def today_in_tz(db):
+    """Current date in the app's configured reminder timezone. The reminder
+    scheduler fires in this zone, so all 'days left' / current-period math must
+    use it too — otherwise a UTC server disagrees by a day near boundaries."""
+    return datetime.now(ZoneInfo(valid_tz(get_setting(db, 'reminder_tz', DEFAULT_TZ)))).date()
+
+
+def _safe_hour(value, default=8):
+    """Coerce a stored reminder_hour to an int in 0–23, falling back to default
+    so a bad value can never wedge the scheduler at startup."""
+    try:
+        h = int(value)
+    except (TypeError, ValueError):
+        return default
+    return h if 0 <= h <= 23 else default
+
+
+def enrich_benefit(db, benefit, user_card_id, today=None):
     """Add period info and usage totals to a benefit row dict, scoped to a
     single user_cards instance. Redemption sums pool across share-group
-    members when the instance is shared; reminder days remain per-instance."""
+    members when the instance is shared; reminder days remain per-instance.
+
+    `today` is the reference date for period/days-left math; it defaults to the
+    app's configured timezone so 'days left' matches when reminders actually
+    fire (the server clock may be UTC). Callers in loops can pass it to avoid a
+    per-benefit settings read."""
+    if today is None:
+        today = today_in_tz(db)
     b = dict(benefit)
-    period_start, period_end = get_current_period(b['period_type'])
+    period_start, period_end = get_current_period(b['period_type'], for_date=today)
     b['period_start'] = period_start
     b['period_end']   = period_end
-    b['days_left']    = days_left(period_end)
+    b['days_left']    = days_left(period_end, today=today)
     b['period_label'] = PERIOD_LABELS[b['period_type']]
 
     pool = effective_user_card_ids(db, user_card_id)
@@ -2259,7 +2283,7 @@ def benefit_redeem(id):
     notes = request.form.get('notes', '').strip() or None
 
     if b['is_subscription']:
-        today = date.today()
+        today = today_in_tz(db)
         def _ym(month_key, year_key):
             m = request.form.get(month_key, '').strip()
             y = request.form.get(year_key, '').strip()
@@ -2320,7 +2344,7 @@ def benefit_redeem(id):
         except ValueError:
             pass
 
-    period_start, _ = get_current_period(b['period_type'], for_date=redemption_date)
+    period_start, _ = get_current_period(b['period_type'], for_date=redemption_date or today_in_tz(db))
 
     amount = request.form.get('amount', '').strip() or None
     if amount:
@@ -2384,7 +2408,7 @@ def redemption_edit(id):
     if date_str:
         try:    redemption_date = date.fromisoformat(date_str)
         except ValueError: pass
-    period_start, _ = get_current_period(row['period_type'], for_date=redemption_date)
+    period_start, _ = get_current_period(row['period_type'], for_date=redemption_date or today_in_tz(db))
     db.execute('UPDATE redemptions SET amount=?, notes=?, period_start=? WHERE id=?',
                (amount, notes, str(period_start), id))
     db.commit()
@@ -2441,7 +2465,7 @@ def benefit_redemptions(id):
     _n_map = {'monthly': 12, 'quarterly': 4, 'semi-annual': 2, 'annual': 1}
     period_history = []
     period_states  = {}
-    check_date = date.today()
+    check_date = today_in_tz(db)
     for _ in range(_n_map.get(enriched['period_type'], 1)):
         p_start, p_end = get_current_period(enriched['period_type'], for_date=check_date)
         pr = db.execute(
@@ -2576,17 +2600,28 @@ def settings():
                 set_setting(db, 'gmail_user', gmail_user)
             if gmail_password:
                 set_setting(db, 'gmail_app_password', gmail_password)
+            # Reminder hour must be an integer 0–23. A bad value is rejected
+            # (the previous valid value stays) so it can't wedge the scheduler.
+            hour_bad = False
             if reminder_hour:
-                set_setting(db, 'reminder_hour', reminder_hour)
+                if reminder_hour.isdigit() and 0 <= int(reminder_hour) <= 23:
+                    set_setting(db, 'reminder_hour', str(int(reminder_hour)))
+                else:
+                    hour_bad = True
             tz_bad = bool(reminder_tz) and valid_tz(reminder_tz, None) is None
             if reminder_tz and not tz_bad:
                 set_setting(db, 'reminder_tz', reminder_tz)
             db.commit()
-            hour = int(reminder_hour) if reminder_hour.isdigit() else 8
-            _reschedule_reminder(hour, get_setting(db, 'reminder_tz', DEFAULT_TZ))
+            _reschedule_reminder(_safe_hour(get_setting(db, 'reminder_hour', '8')),
+                                 get_setting(db, 'reminder_tz', DEFAULT_TZ))
             db.close()
+            warnings = []
             if tz_bad:
-                flash('Saved, but that timezone wasn\'t recognized — left unchanged.', 'warning')
+                warnings.append("that timezone wasn't recognized")
+            if hour_bad:
+                warnings.append('the reminder hour must be a whole number from 0 to 23')
+            if warnings:
+                flash('Saved, but ' + ' and '.join(warnings) + ' — left unchanged.', 'warning')
             else:
                 flash('Email settings saved.', 'success')
             return redirect(url_for('settings'))
@@ -2888,7 +2923,17 @@ def start_scheduler(hour=8, tz=DEFAULT_TZ):
 
 # ── Jinja helpers ──────────────────────────────────────────────────────────────
 
-app.jinja_env.globals['today'] = date.today
+def _jinja_today():
+    """Timezone-aware 'today' for templates (e.g. default date pickers), so it
+    matches the rest of the period math rather than the server's UTC clock."""
+    db = get_db()
+    try:
+        return today_in_tz(db)
+    finally:
+        db.close()
+
+
+app.jinja_env.globals['today'] = _jinja_today
 app.jinja_env.globals['period_labels'] = PERIOD_LABELS
 
 
@@ -2899,7 +2944,7 @@ if os.environ.get('WERKZEUG_RUN_MAIN') != 'false_sentinel':  # always true, just
     _is_werkzeug_parent = (app.debug and os.environ.get('WERKZEUG_RUN_MAIN') != 'true')
     if not _is_werkzeug_parent:
         _db = get_db()
-        _hour = int(get_setting(_db, 'reminder_hour', '8'))
+        _hour = _safe_hour(get_setting(_db, 'reminder_hour', '8'))
         _tz   = get_setting(_db, 'reminder_tz', DEFAULT_TZ)
         _db.close()
         start_scheduler(_hour, _tz)

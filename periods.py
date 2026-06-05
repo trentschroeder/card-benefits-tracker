@@ -34,5 +34,5 @@ def get_current_period(period_type, for_date=None):
     return period_start, period_end
 
 
-def days_left(period_end):
-    return (period_end - date.today()).days
+def days_left(period_end, today=None):
+    return (period_end - (today or date.today())).days
