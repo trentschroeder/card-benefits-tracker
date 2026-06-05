@@ -107,17 +107,60 @@ def send_invite_email(gmail_user, gmail_app_password, recipient, accept_url, inv
         server.sendmail(gmail_user, recipient, msg.as_string())
 
 
-def send_reminder_email(gmail_user, gmail_app_password, recipient, benefits_due):
+def _offer_blocks_html(offers, font):
+    """Render the gift-card/coupon/promotion cards shown in reminder emails."""
+    blocks = ""
+    for o in offers:
+        name = escape(o['name'])
+        dl  = o.get('days_left')
+        exp = o.get('expiration')
+        if exp and dl is not None:
+            urg = "#dc2626" if dl <= 3 else ("#ea7317" if dl <= 7 else "#16a34a")
+            pill_txt = "Expires today" if dl <= 0 else f"{dl} day{'s' if dl != 1 else ''} left"
+            day_pill = (f'<span style="background:{urg};color:#ffffff;font:700 11px {font};'
+                        f'padding:4px 11px;border-radius:999px;white-space:nowrap;">{pill_txt}</span>')
+        else:
+            day_pill = ''
+        meta_bits = []
+        if o.get('detail'):
+            meta_bits.append(escape(o['detail']))
+        meta_bits.append(f"expires {escape(exp)}" if exp else "no expiration")
+        meta = ' &middot; '.join(meta_bits)
+        blocks += f"""
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
+               style="border:1px solid #e6eaf2;border-radius:10px;background:#ffffff;margin:0 0 14px;">
+          <tr><td style="padding:15px 16px;">
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+              <tr>
+                <td style="font:600 15px {font};color:#1a2233;">{name}</td>
+                <td align="right" style="white-space:nowrap;padding-left:10px;">{day_pill}</td>
+              </tr>
+            </table>
+            <div style="font:400 12px {font};color:#8a93a6;margin-top:5px;">{meta}</div>
+          </td></tr>
+        </table>"""
+    return blocks
+
+
+def send_reminder_email(gmail_user, gmail_app_password, recipient, benefits_due, offers=None):
     """
     benefits_due: list of dicts with keys:
       card_name, benefit_name, credit_amount,
       amount_used, period_end, days_left
+    offers: optional list of dicts (gift cards / coupons / promotions) with keys:
+      name, detail, expiration, days_left. When benefits_due is present
+      these ride along as an awareness footer; when it's empty they are the email.
     """
-    if not benefits_due:
+    offers = offers or []
+    if not benefits_due and not offers:
         return
 
-    n = len(benefits_due)
-    subject = f"{n} benefit{'s' if n != 1 else ''} need attention before the deadline"
+    n   = len(benefits_due)
+    n_o = len(offers)
+    if benefits_due:
+        subject = f"{n} benefit{'s' if n != 1 else ''} need attention before the deadline"
+    else:
+        subject = f"{n_o} offer{'s' if n_o != 1 else ''} to use before they expire"
     font = "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif"
 
     blocks = ""
@@ -177,7 +220,31 @@ def send_reminder_email(gmail_user, gmail_app_password, recipient, benefits_due)
           </td></tr>
         </table>"""
 
-    preheader = f"{n} benefit{'s' if n != 1 else ''} with unused credit and a deadline coming up."
+    offer_blocks = _offer_blocks_html(offers, font)
+
+    if benefits_due:
+        preheader = f"{n} benefit{'s' if n != 1 else ''} with unused credit and a deadline coming up."
+        heading   = f"{n} benefit{'s' if n != 1 else ''} need attention"
+        intro     = "These have unused credit with a deadline coming up. Tap <b>Mark redeemed</b> to log one in a single step."
+        footer_note = "You can change a benefit's reminder schedule from its page in your wallet."
+    else:
+        preheader = f"{n_o} offer{'s' if n_o != 1 else ''} you haven't used yet."
+        heading   = f"{n_o} offer{'s' if n_o != 1 else ''} to use"
+        intro     = "These gift cards, coupons and promotions are still unredeemed. Open Card Benefits to mark them used once you do."
+        footer_note = "You can change an offer's reminder schedule, or mark it used, from the Offers page in your wallet."
+
+    benefits_row = f'<tr><td style="padding:16px 24px 4px;">{blocks}</td></tr>' if benefits_due else ''
+
+    if offers:
+        offers_heading = (
+            f'<div style="font:700 14px {font};color:#1a2233;margin:4px 0 2px;">Gift cards &amp; offers</div>'
+            f'<div style="font:400 12px {font};color:#5b6472;margin-bottom:12px;">'
+            f'Awareness reminder — mark these used in your wallet once redeemed.</div>'
+        ) if benefits_due else ''
+        offers_row = f'<tr><td style="padding:8px 24px 4px;">{offers_heading}{offer_blocks}</td></tr>'
+    else:
+        offers_row = ''
+
     html = f"""<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
 <body style="margin:0;padding:0;background:#eef1f6;">
@@ -193,16 +260,17 @@ def send_reminder_email(gmail_user, gmail_app_password, recipient, benefits_due)
           </tr></table>
         </td></tr>
         <tr><td style="padding:24px 24px 4px;">
-          <div style="font:700 19px {font};color:#1a2233;">{n} benefit{'s' if n != 1 else ''} need attention</div>
+          <div style="font:700 19px {font};color:#1a2233;">{heading}</div>
           <div style="font:400 14px {font};color:#5b6472;margin-top:6px;line-height:1.5;">
-            These have unused credit with a deadline coming up. Tap <b>Mark redeemed</b> to log one in a single step.
+            {intro}
           </div>
         </td></tr>
-        <tr><td style="padding:16px 24px 4px;">{blocks}</td></tr>
+        {benefits_row}
+        {offers_row}
         <tr><td style="padding:4px 24px 26px;">
           <div style="border-top:1px solid #eef1f6;padding-top:16px;font:400 12px {font};color:#98a2b3;line-height:1.6;">
             Sent by <a href="https://cardbenefits.trentschroeder.com" style="color:#1a3c8a;text-decoration:none;">Card Benefits</a>.
-            You can change a benefit's reminder schedule from its page in your wallet.
+            {footer_note}
           </div>
         </td></tr>
       </table>

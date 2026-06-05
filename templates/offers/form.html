@@ -1,0 +1,93 @@
+{% extends 'base.html' %}
+{% block title %}{% if offer %}Edit {{ offer.name }}{% else %}Add offer{% endif %} — Card Benefits{% endblock %}
+{% block content %}
+
+<div class="d-flex align-items-center gap-2 mb-3">
+  <h2 class="mb-0">{% if offer %}Edit offer{% else %}Add an offer{% endif %}</h2>
+</div>
+<p class="text-muted small mb-4">
+  Track a gift card, coupon, or promotion you want to remember to use. Add an
+  expiration date to get reminder emails before it lapses, and a starting amount
+  to track a balance as you spend it down.
+</p>
+
+<div class="card p-4 mb-4">
+  <form method="post">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+    <div class="mb-3">
+      <label class="form-label">Name <span class="text-danger">*</span></label>
+      <input name="name" type="text" class="form-control"
+             value="{{ form.get('name', '') }}" required autofocus
+             placeholder="e.g. Amazon gift card, REI 20% off coupon">
+    </div>
+
+    <div class="mb-3">
+      <label class="form-label">Description</label>
+      <input name="description" type="text" class="form-control"
+             value="{{ form.get('description', '') or '' }}"
+             placeholder="e.g. From birthday, or code SAVE20 at checkout">
+    </div>
+
+    <div class="row">
+      <div class="col-sm-6 mb-3">
+        <label class="form-label">Starting amount ($)</label>
+        <input name="amount" type="number" step="0.01" min="0" class="form-control"
+               value="{{ form.get('amount', '') or '' }}"
+               placeholder="Leave blank for a one-time coupon">
+        <div class="form-text">Leave blank to track as used / not-used instead of by balance.</div>
+      </div>
+      <div class="col-sm-6 mb-3">
+        <label class="form-label">Expiration date</label>
+        <input name="expiration_date" type="date" class="form-control" id="expirationDate"
+               value="{{ form.get('expiration_date', '') or '' }}">
+        <div class="form-text">Optional. Required for reminder emails.</div>
+      </div>
+    </div>
+
+    <div class="mb-3">
+      <label class="form-label d-block mb-1"><i class="bi bi-bell me-1"></i>Email reminders</label>
+      <div class="form-text mb-2" id="reminderHint">
+        Send a nudge this many days before the expiration date.
+      </div>
+      <div class="d-flex flex-wrap gap-3" id="reminderChoices">
+        {% for days in offer_reminder_choices %}
+        <div class="form-check">
+          <input type="checkbox" name="reminder_days" value="{{ days }}" id="rem{{ days }}"
+                 class="form-check-input reminder-choice" {% if days in selected_days %}checked{% endif %}>
+          <label class="form-check-label" for="rem{{ days }}">{{ days }} day{{ 's' if days != 1 }}</label>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+
+    <div class="d-flex gap-2 mt-4">
+      <button class="btn btn-primary">Save</button>
+      <a href="{{ url_for('offers_list') }}" class="btn btn-outline-secondary">Cancel</a>
+    </div>
+  </form>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function() {
+  // Reminders only fire when there's an expiration date — gray the choices out
+  // (purely a UI cue; the server simply never fires reminders without a date).
+  var dateInput = document.getElementById('expirationDate');
+  var hint      = document.getElementById('reminderHint');
+  var boxes     = document.querySelectorAll('.reminder-choice');
+  if (!dateInput) return;
+  function refresh() {
+    var has = !!dateInput.value;
+    boxes.forEach(function(b) { b.disabled = !has; });
+    hint.textContent = has
+      ? 'Send a nudge this many days before the expiration date.'
+      : 'Add an expiration date above to enable reminders.';
+  }
+  dateInput.addEventListener('change', refresh);
+  refresh();
+})();
+</script>
+{% endblock %}

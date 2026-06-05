@@ -812,6 +812,113 @@ _DEFAULT_REMINDER_DAYS = {
 # this to the valid set for the selected period.
 _ALL_REMINDER_DAYS = [1, 3, 7, 14, 30, 60, 90]
 
+# ── Offers (gift cards / coupons / promotions) ──────────────────────────────────
+# Personal, one-shot items with a fixed expiration date (not a recurring period),
+# so reminders are a simple "N days before expiration". A new offer starts with a
+# sensible two-nudge schedule the user can tweak.
+_OFFER_REMINDER_DAY_CHOICES   = [1, 3, 7, 14, 30]
+_OFFER_DEFAULT_REMINDER_DAYS  = [14, 3]
+
+
+def _parse_offer_reminder_days(form):
+    """Read reminder-day checkboxes from an offer form, keeping only the offered
+    choices."""
+    days = set()
+    for raw in form.getlist('reminder_days'):
+        try:
+            n = int((raw or '').strip())
+        except ValueError:
+            continue
+        if n in _OFFER_REMINDER_DAY_CHOICES:
+            days.add(n)
+    return sorted(days)
+
+
+def enrich_offer(db, offer, today=None):
+    """Add display fields (remaining balance, days-left, reminder schedule) to an
+    offer row dict."""
+    if today is None:
+        today = today_in_tz(db)
+    o = dict(offer)
+    if o.get('amount') is not None:
+        used = o.get('amount_used') or 0
+        o['remaining'] = max(0.0, o['amount'] - used)
+        o['pct_used']  = min(100, int((used / o['amount']) * 100)) if o['amount'] else 0
+        o['fully_used'] = o['remaining'] <= 0
+    else:
+        o['remaining'] = None
+        o['pct_used']  = 0
+        o['fully_used'] = False
+
+    exp = o.get('expiration_date')
+    if exp:
+        try:
+            exp_date = date.fromisoformat(str(exp))
+            o['days_left'] = (exp_date - today).days
+            o['expired']   = o['days_left'] < 0
+        except (ValueError, TypeError):
+            o['days_left'] = None
+            o['expired']   = False
+    else:
+        o['days_left'] = None
+        o['expired']   = False
+
+    rows = db.execute(
+        'SELECT days_before FROM offer_reminders WHERE offer_id = ? ORDER BY days_before DESC',
+        (o['id'],)).fetchall()
+    o['reminder_days'] = [r['days_before'] for r in rows]
+    return o
+
+
+def _offer_email_dict(o):
+    """Shape an enriched offer for the reminder-email renderer."""
+    detail = None
+    if o.get('amount') is not None:
+        detail = f"${o['remaining']:,.0f} of ${o['amount']:,.0f} left"
+    exp_str = None
+    if o.get('expiration_date'):
+        try:
+            exp_str = date.fromisoformat(str(o['expiration_date'])).strftime('%b %d, %Y')
+        except (ValueError, TypeError):
+            exp_str = None
+    return {
+        'name':       o['name'],
+        'detail':     detail,
+        'expiration': exp_str,
+        'days_left':  o.get('days_left'),
+    }
+
+
+def _gather_user_offers(db, uid, today, force=False):
+    """For a user's reminder run, return (offers_for_email, due_keys):
+      offers_for_email: every active, non-expired offer shaped for the email
+                        footer (awareness on every benefit email);
+      due_keys: list of (offer_id, days_before) whose lead-time threshold is
+                reached and not yet sent — these drive a standalone offers email
+                and get logged to offer_sent_reminders once the email goes out."""
+    rows = db.execute(
+        'SELECT * FROM offers WHERE user_id = ? AND archived = 0', (uid,)).fetchall()
+    offers_for_email = []
+    due_keys = []
+    for r in rows:
+        o = enrich_offer(db, r, today)
+        if o['expired']:
+            continue  # don't keep nagging about offers that already lapsed
+        offers_for_email.append(_offer_email_dict(o))
+        if o['days_left'] is None:
+            continue
+        # reminder_days is sorted DESC; fire the first (earliest) threshold that
+        # is reached and hasn't been sent, mirroring the benefit catch-up logic.
+        for d in o['reminder_days']:
+            if o['days_left'] <= d:
+                already = db.execute(
+                    'SELECT 1 FROM offer_sent_reminders WHERE offer_id = ? AND days_before = ?',
+                    (o['id'], d)).fetchone()
+                if not already or force:
+                    due_keys.append((o['id'], d))
+                break
+    return offers_for_email, due_keys
+
 
 def _parse_reminder_days(form, period_type):
     """Read the reminder_days checkboxes + custom field from a submitted form,
@@ -2840,6 +2947,8 @@ def send_test_reminder():
             'days_left':     b['days_left'],
             'redeem_url':    f"{base_url}/r/{_make_redeem_token(uc_id, b['id'], str(b['period_start']))}",
         })
+    # Preview the awareness footer too, using the user's real active offers.
+    offers_email, _ = _gather_user_offers(db, uid, today_in_tz(db))
     db.close()
 
     due.sort(key=lambda d: d['days_left'])
@@ -2852,11 +2961,209 @@ def send_test_reminder():
         }]
 
     try:
-        send_reminder_email(gmail_user, gmail_pass, recipient, due)
+        send_reminder_email(gmail_user, gmail_pass, recipient, due, offers=offers_email)
         flash(f'Test reminder sent to {recipient} — {len(due)} benefit(s).', 'success')
     except Exception as e:
         flash(f'Failed to send email: {e}', 'danger')
     return redirect(url_for('settings'))
+
+
+# ── Offers (gift cards / coupons / promotions) ──────────────────────────────────
+
+def _offer_form_ctx(selected_days):
+    """Template context for the offer create/edit form's reminder controls."""
+    return dict(
+        offer_reminder_choices=_OFFER_REMINDER_DAY_CHOICES,
+        selected_days=selected_days,
+    )
+
+
+def _read_offer_form(form):
+    """Parse + validate an offer form. Returns (values_dict, error_msg). On
+    success error_msg is None; the dict holds cleaned fields plus reminder_days."""
+    name        = form.get('name', '').strip()
+    description = form.get('description', '').strip() or None
+    amount_raw  = form.get('amount', '').strip()
+    exp_raw     = form.get('expiration_date', '').strip()
+    days        = _parse_offer_reminder_days(form)
+
+    if not name:
+        return None, 'Name is required.'
+
+    amount = None
+    if amount_raw:
+        try:
+            amount = float(amount_raw)
+        except ValueError:
+            return None, 'Amount must be a number.'
+        if amount <= 0:
+            return None, 'Amount must be greater than zero.'
+
+    expiration_date = None
+    if exp_raw:
+        try:
+            expiration_date = date.fromisoformat(exp_raw).isoformat()
+        except ValueError:
+            return None, 'Expiration date is invalid.'
+
+    return {
+        'name': name, 'description': description,
+        'amount': amount, 'expiration_date': expiration_date,
+        'reminder_days': days,
+    }, None
+
+
+@app.route('/offers')
+@login_required
+def offers_list():
+    db  = get_db()
+    uid = g.user['id']
+    today = today_in_tz(db)
+    rows = db.execute(
+        'SELECT * FROM offers WHERE user_id = ? AND archived = 0 ORDER BY '
+        # Soonest expiration first; undated offers sink to the bottom.
+        'CASE WHEN expiration_date IS NULL THEN 1 ELSE 0 END, expiration_date, created_at DESC',
+        (uid,)).fetchall()
+    offers = [enrich_offer(db, r, today) for r in rows]
+    db.close()
+    return render_template('offers/list.html', offers=offers)
+
+
+@app.route('/offers/new', methods=['GET', 'POST'])
+@login_required
+def offer_new():
+    if request.method == 'POST':
+        values, err = _read_offer_form(request.form)
+        if err:
+            flash(err, 'danger')
+            return render_template('offers/form.html', offer=None, form=request.form,
+                                   **_offer_form_ctx(_parse_offer_reminder_days(request.form)))
+        db  = get_db()
+        cur = db.execute(
+            'INSERT INTO offers (user_id, name, description, amount, expiration_date) '
+            'VALUES (?, ?, ?, ?, ?)',
+            (g.user['id'], values['name'], values['description'],
+             values['amount'], values['expiration_date']))
+        oid = cur.lastrowid
+        for d in values['reminder_days']:
+            db.execute('INSERT OR IGNORE INTO offer_reminders (offer_id, days_before) VALUES (?, ?)',
+                       (oid, d))
+        db.commit()
+        db.close()
+        flash(f'Offer "{values["name"]}" added.', 'success')
+        return redirect(url_for('offers_list'))
+
+    return render_template('offers/form.html', offer=None, form={},
+                           **_offer_form_ctx(_OFFER_DEFAULT_REMINDER_DAYS))
+
+
+@app.route('/offers/<int:id>/edit', methods=['GET', 'POST'])
+@login_required
+def offer_edit(id):
+    db  = get_db()
+    uid = g.user['id']
+    offer = db.execute('SELECT * FROM offers WHERE id = ? AND user_id = ?', (id, uid)).fetchone()
+    if not offer:
+        db.close()
+        flash('Offer not found.', 'danger')
+        return redirect(url_for('offers_list'))
+
+    if request.method == 'POST':
+        values, err = _read_offer_form(request.form)
+        if err:
+            db.close()
+            flash(err, 'danger')
+            return render_template('offers/form.html', offer=offer, form=request.form,
+                                   **_offer_form_ctx(_parse_offer_reminder_days(request.form)))
+        # Don't let an edit drop the recorded balance below what's already used.
+        amount_used = offer['amount_used'] or 0
+        if values['amount'] is not None and values['amount'] < amount_used:
+            db.close()
+            flash(f'Amount can\'t be less than the ${amount_used:,.2f} already redeemed.', 'danger')
+            return render_template('offers/form.html', offer=offer, form=request.form,
+                                   **_offer_form_ctx(values['reminder_days']))
+        db.execute(
+            'UPDATE offers SET name=?, description=?, amount=?, expiration_date=? WHERE id=?',
+            (values['name'], values['description'],
+             values['amount'], values['expiration_date'], id))
+        # Replace the reminder schedule with the submitted set; reset the dedup
+        # log so a newly added threshold can fire again this cycle.
+        db.execute('DELETE FROM offer_reminders WHERE offer_id = ?', (id,))
+        for d in values['reminder_days']:
+            db.execute('INSERT OR IGNORE INTO offer_reminders (offer_id, days_before) VALUES (?, ?)',
+                       (id, d))
+        db.execute('DELETE FROM offer_sent_reminders WHERE offer_id = ?', (id,))
+        db.commit()
+        db.close()
+        flash(f'Offer "{values["name"]}" updated.', 'success')
+        return redirect(url_for('offers_list'))
+
+    saved_days = [r['days_before'] for r in db.execute(
+        'SELECT days_before FROM offer_reminders WHERE offer_id = ? ORDER BY days_before', (id,)).fetchall()]
+    db.close()
+    return render_template('offers/form.html', offer=offer, form=dict(offer),
+                           **_offer_form_ctx(saved_days))
+
+
+@app.route('/offers/<int:id>/redeem', methods=['POST'])
+@login_required
+def offer_redeem(id):
+    """Record a redemption against an offer. For dollar offers, add to the used
+    total (or 'mark fully used' to zero out the balance); when the balance hits
+    zero the offer is archived. For non-dollar offers, this just marks it used
+    and archives it. Per the spec we keep no per-redemption history."""
+    db  = get_db()
+    uid = g.user['id']
+    offer = db.execute('SELECT * FROM offers WHERE id = ? AND user_id = ?', (id, uid)).fetchone()
+    if not offer:
+        db.close()
+        flash('Offer not found.', 'danger')
+        return redirect(url_for('offers_list'))
+
+    if offer['amount'] is not None:
+        used = offer['amount_used'] or 0
+        if request.form.get('full'):
+            used = offer['amount']
+        else:
+            amount_raw = request.form.get('amount', '').strip()
+            try:
+                add = float(amount_raw)
+            except ValueError:
+                db.close()
+                flash('Enter a valid redemption amount.', 'danger')
+                return redirect(url_for('offers_list'))
+            if add <= 0:
+                db.close()
+                flash('Redemption amount must be greater than zero.', 'danger')
+                return redirect(url_for('offers_list'))
+            used = min(offer['amount'], used + add)
+        archived = 1 if used >= offer['amount'] else 0
+        db.execute('UPDATE offers SET amount_used = ?, archived = ? WHERE id = ?',
+                   (used, archived, id))
+        msg = (f'"{offer["name"]}" fully redeemed — moved out of your list.' if archived
+               else f'Recorded — ${max(0.0, offer["amount"] - used):,.2f} left on "{offer["name"]}".')
+    else:
+        db.execute('UPDATE offers SET archived = 1 WHERE id = ?', (id,))
+        msg = f'"{offer["name"]}" marked used.'
+
+    db.commit()
+    db.close()
+    flash(msg, 'success')
+    return redirect(url_for('offers_list'))
+
+
+@app.route('/offers/<int:id>/delete', methods=['POST'])
+@login_required
+def offer_delete(id):
+    db  = get_db()
+    uid = g.user['id']
+    row = db.execute('SELECT name FROM offers WHERE id = ? AND user_id = ?', (id, uid)).fetchone()
+    if row:
+        db.execute('DELETE FROM offers WHERE id = ? AND user_id = ?', (id, uid))
+        db.commit()
+        flash(f'Offer "{row["name"]}" deleted.', 'success')
+    db.close()
+    return redirect(url_for('offers_list'))
 
 
 # ── Reminder logic ─────────────────────────────────────────────────────────────
@@ -2936,9 +3243,18 @@ def _run_reminder_check(force=False):
                                 (uc_id, b['id'], period_start_str, days_before))
                         break  # only include a benefit once per email
 
-        if benefits_due:
+        # Offers ride along every benefit email as an awareness footer; if none
+        # of the user's benefits are due but an offer's lead-time has arrived,
+        # send a standalone offers email instead.
+        offers_email, due_offer_keys = _gather_user_offers(db, uid, today_in_tz(db), force)
+
+        if benefits_due or due_offer_keys:
             try:
-                send_reminder_email(gmail_user, gmail_pass, recipient, benefits_due)
+                send_reminder_email(gmail_user, gmail_pass, recipient, benefits_due, offers=offers_email)
+                for oid, d in due_offer_keys:
+                    db.execute(
+                        'INSERT OR IGNORE INTO offer_sent_reminders (offer_id, days_before) VALUES (?, ?)',
+                        (oid, d))
                 db.commit()
                 total_sent += len(benefits_due)
             except Exception as e:

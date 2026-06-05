@@ -786,6 +786,14 @@
             <i class="bi bi-wallet2 me-1"></i>My Wallet
           </a>
         </li>
+        {% if g.user %}
+        <li class="nav-item">
+          <a class="nav-link {% if request.path.startswith('/offers') %}active{% endif %}"
+             href="{{ url_for('offers_list') }}">
+            <i class="bi bi-tag-fill me-1"></i>Offers
+          </a>
+        </li>
+        {% endif %}
         {% if g.user and g.user.is_admin %}
         <li class="nav-item">
           <a class="nav-link {% if request.path == '/card-templates' %}active{% endif %}"
@@ -848,6 +856,13 @@
     <i class="bi bi-wallet2"></i>
     <span>My Wallet</span>
   </a>
+  {% if g.user %}
+  <a class="tab-item {% if request.path.startswith('/offers') %}active{% endif %}"
+     href="{{ url_for('offers_list') }}">
+    <i class="bi bi-tag-fill"></i>
+    <span>Offers</span>
+  </a>
+  {% endif %}
   {% if g.user %}
   <a class="tab-item {% if request.path == '/settings' %}active{% endif %}"
      href="{{ url_for('settings') }}">

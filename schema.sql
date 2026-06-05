@@ -160,6 +160,45 @@ CREATE TABLE IF NOT EXISTS card_requests (
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
+-- Offers: gift cards / coupons / promotions a user wants to remember to use.
+-- Unlike benefits these are personal (owned directly by a user, never shared)
+-- and one-shot rather than recurring: an optional fixed expiration date drives
+-- reminders, and once fully used an offer is archived (hidden) rather than reset.
+CREATE TABLE IF NOT EXISTS offers (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id         INTEGER NOT NULL,
+    name            TEXT    NOT NULL,
+    description     TEXT,
+    amount          REAL,            -- optional starting value; NULL = track as used/not-used
+    amount_used     REAL    NOT NULL DEFAULT 0,  -- cumulative redeemed against amount
+    expiration_date DATE,            -- optional; required for date-based reminders
+    archived        INTEGER NOT NULL DEFAULT 0,  -- 1 once fully used (hidden from UI)
+    created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+-- Per-offer reminder schedule: send a nudge this many days before expiration.
+CREATE TABLE IF NOT EXISTS offer_reminders (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    offer_id     INTEGER NOT NULL,
+    days_before  INTEGER NOT NULL,
+    UNIQUE(offer_id, days_before),
+    FOREIGN KEY (offer_id) REFERENCES offers(id) ON DELETE CASCADE
+);
+
+-- Dedup log for offer reminders. An offer has a single fixed expiration (no
+-- recurring period), so one row per (offer, days_before) threshold suffices.
+CREATE TABLE IF NOT EXISTS offer_sent_reminders (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    offer_id     INTEGER NOT NULL,
+    days_before  INTEGER NOT NULL,
+    sent_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(offer_id, days_before),
+    FOREIGN KEY (offer_id) REFERENCES offers(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_offers_user   ON offers(user_id, archived);
+CREATE INDEX IF NOT EXISTS idx_offer_reminders ON offer_reminders(offer_id);
 CREATE INDEX IF NOT EXISTS idx_benefits_card   ON benefits(card_id);
 CREATE INDEX IF NOT EXISTS idx_benefit_default_reminders ON benefit_default_reminders(benefit_id);
 CREATE INDEX IF NOT EXISTS idx_user_cards_user ON user_cards(user_id, active);

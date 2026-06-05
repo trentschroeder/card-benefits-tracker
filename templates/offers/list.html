@@ -1,0 +1,144 @@
+{% extends 'base.html' %}
+{% block title %}Offers — Card Benefits{% endblock %}
+{% block content %}
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h2 class="mb-0"><i class="bi bi-tag-fill me-2"></i>Offers</h2>
+  <a href="{{ url_for('offer_new') }}" class="btn btn-primary btn-sm">
+    <i class="bi bi-plus-lg me-1"></i>Add Offer
+  </a>
+</div>
+<p class="text-muted small mb-4">
+  Gift cards, coupons, and promotions you want to remember to use. They appear at
+  the bottom of your benefit reminder emails, and can send their own reminders
+  before they expire.
+</p>
+
+{% if not offers %}
+<div class="text-center py-5 text-muted">
+  <i class="bi bi-tag display-4 mb-3 d-block"></i>
+  No offers yet. <a href="{{ url_for('offer_new') }}">Add one</a> to keep track of a
+  gift card, coupon, or promotion.
+</div>
+{% endif %}
+
+{% for o in offers %}
+<div class="card p-3 mb-3">
+  <div class="d-flex justify-content-between align-items-start gap-2">
+    <div class="flex-grow-1">
+      <div class="d-flex align-items-center flex-wrap gap-2">
+        <span class="fw-semibold">{{ o.name }}</span>
+        {% if o.expiration_date %}
+          {% if o.expired %}
+            <span class="badge bg-danger">Expired</span>
+          {% elif o.days_left is not none and o.days_left <= 3 %}
+            <span class="badge bg-danger">{{ 'Expires today' if o.days_left <= 0 else o.days_left ~ ' day' ~ ('s' if o.days_left != 1 else '') ~ ' left' }}</span>
+          {% elif o.days_left is not none and o.days_left <= 7 %}
+            <span class="badge bg-warning text-dark">{{ o.days_left }} days left</span>
+          {% else %}
+            <span class="badge bg-success-subtle text-success">{{ o.days_left }} days left</span>
+          {% endif %}
+        {% endif %}
+      </div>
+      {% if o.description %}<div class="text-muted small mt-1">{{ o.description }}</div>{% endif %}
+
+      <div class="text-muted small mt-2 d-flex flex-wrap gap-3">
+        {% if o.amount is not none %}
+          <span><i class="bi bi-cash-coin me-1"></i>${{ '%.2f' | format(o.remaining) }} of ${{ '%.2f' | format(o.amount) }} left</span>
+        {% endif %}
+        {% if o.expiration_date %}
+          <span><i class="bi bi-calendar-event me-1"></i>Expires {{ o.expiration_date }}</span>
+        {% endif %}
+        {% if o.reminder_days %}
+          <span><i class="bi bi-bell me-1"></i>{{ o.reminder_days | join(', ') }} days before</span>
+        {% endif %}
+      </div>
+
+      {% if o.amount is not none %}
+      <div class="progress mt-2" style="height:6px; max-width:320px;">
+        <div class="progress-bar {{ 'bg-success' if o.pct_used >= 60 else 'bg-warning' }}"
+             role="progressbar" style="width: {{ o.pct_used }}%;"></div>
+      </div>
+      {% endif %}
+    </div>
+
+    <div class="d-flex flex-column gap-2 align-items-end" style="white-space:nowrap;">
+      <button type="button" class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#redeemModal{{ o.id }}">
+        <i class="bi bi-check2-circle me-1"></i>{{ 'Redeem' if o.amount is not none else 'Mark used' }}
+      </button>
+      <div class="d-flex gap-2">
+        <a href="{{ url_for('offer_edit', id=o.id) }}" class="btn btn-outline-secondary btn-sm" title="Edit">
+          <i class="bi bi-pencil"></i>
+        </a>
+        <button type="button" class="btn btn-outline-danger btn-sm" title="Delete"
+                data-bs-toggle="modal" data-bs-target="#deleteModal{{ o.id }}">
+          <i class="bi bi-trash"></i>
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Redeem modal -->
+<div class="modal fade" id="redeemModal{{ o.id }}" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h6 class="modal-title">{{ 'Record a redemption' if o.amount is not none else 'Mark used' }}</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <form method="post" action="{{ url_for('offer_redeem', id=o.id) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="modal-body">
+          {% if o.amount is not none %}
+            <p class="small text-muted mb-3">
+              <strong>{{ o.name }}</strong> — ${{ '%.2f' | format(o.remaining) }} of
+              ${{ '%.2f' | format(o.amount) }} remaining.
+            </p>
+            <label class="form-label">Amount redeemed ($)</label>
+            <input name="amount" type="number" step="0.01" min="0.01" max="{{ '%.2f' | format(o.remaining) }}"
+                   class="form-control" placeholder="0.00" autofocus>
+            <div class="form-text">
+              Leave the balance partly used, or use the button below to close it out.
+              We don't keep a per-redemption history — only the remaining balance.
+            </div>
+          {% else %}
+            <p class="mb-0">Mark <strong>{{ o.name }}</strong> as used? It will move out of your offers list.</p>
+          {% endif %}
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+          {% if o.amount is not none %}
+            <button class="btn btn-primary btn-sm" name="partial" value="1">Record amount</button>
+            <button class="btn btn-success btn-sm" name="full" value="1">Mark fully used</button>
+          {% else %}
+            <button class="btn btn-success btn-sm" name="full" value="1">Mark used</button>
+          {% endif %}
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- Delete modal -->
+<div class="modal fade" id="deleteModal{{ o.id }}" tabindex="-1">
+  <div class="modal-dialog modal-sm modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h6 class="modal-title text-danger">Delete offer</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">Delete <strong>{{ o.name }}</strong>? This can't be undone.</div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+        <form method="post" action="{{ url_for('offer_delete', id=o.id) }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button class="btn btn-danger btn-sm">Delete</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endfor %}
+
+{% endblock %}
