@@ -289,8 +289,11 @@
       z-index: 0;
     }
     /* No z-index here — giving container-lg a z-index would create a stacking
-       context that traps position:fixed modals, causing the backdrop to cover them. */
-    [data-theme="ai"] .container-lg, [data-theme="ai"] nav { position: relative; }
+       context that traps position:fixed modals, causing the backdrop to cover them.
+       NB: don't include `nav` here — it would override the mobile navbar's
+       position:sticky and the bottom tab bar's position:fixed (higher specificity
+       than their own .navbar/.mobile-tabbar rules), unanchoring them in AI mode. */
+    [data-theme="ai"] .container-lg { position: relative; }
     [data-theme="ai"] .card {
       backdrop-filter: blur(12px);
       -webkit-backdrop-filter: blur(12px);
@@ -492,6 +495,8 @@
 
     /* Bottom tab bar is hidden by default; shown only on mobile */
     .mobile-tabbar { display: none; }
+    /* Install hint stays hidden until JS opts in (mobile + not standalone) */
+    .a2hs-hint { display: none; }
 
     @media (max-width: 768px) {
       :root {
@@ -562,6 +567,9 @@
         border-radius: 10px !important;
       }
       .btn-sm { min-height: 36px; font-size: 14px; }
+      /* Press feedback — buttons and tappable links spring slightly on tap */
+      .btn { transition: transform .12s ease; }
+      .btn:active { transform: scale(.97); }
       .btn-group .btn { border-radius: 0 !important; }
       .btn-group > .btn:first-child { border-top-left-radius: 10px !important; border-bottom-left-radius: 10px !important; }
       .btn-group > .btn:last-child  { border-top-right-radius: 10px !important; border-bottom-right-radius: 10px !important; }
@@ -621,10 +629,45 @@
         margin-bottom: 1px;
       }
       .mobile-tabbar .tab-item:active { transform: scale(.94); }
-      .mobile-tabbar .tab-item.active { color: var(--text-nav-hover); }
+      .mobile-tabbar .tab-item.active {
+        color: var(--text-nav-hover);
+        background: color-mix(in srgb, currentColor 13%, transparent);
+      }
+      .mobile-tabbar .tab-item.active i { transform: scale(1.08); }
+      .mobile-tabbar .tab-item.active span { font-weight: 700; }
       [data-theme="ai"] .mobile-tabbar .tab-item.active {
         color: #00e5ff;
         text-shadow: 0 0 8px rgba(0,229,255,.6);
+      }
+
+      /* ── Add-to-Home-Screen hint (shown by JS on mobile, non-standalone) ── */
+      .a2hs-hint.a2hs-show {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        position: fixed;
+        left: 10px;
+        right: 10px;
+        bottom: calc(var(--tabbar-h) + var(--safe-bottom) + 12px);
+        z-index: 1031;
+        background: var(--bg-card);
+        color: var(--text-primary);
+        border: 1px solid var(--border-color);
+        border-radius: 12px;
+        padding: 10px 12px;
+        box-shadow: 0 8px 28px rgba(0,0,0,.28);
+        font-size: .85rem;
+      }
+      [data-theme="ai"] .a2hs-hint.a2hs-show {
+        box-shadow: 0 0 20px rgba(0,200,255,.25), 0 8px 28px rgba(0,0,0,.5);
+        backdrop-filter: blur(10px);
+      }
+      .a2hs-hint .a2hs-icon { font-size: 1.5rem; flex-shrink: 0; color: var(--text-primary); }
+      .a2hs-hint .a2hs-text { flex: 1 1 auto; line-height: 1.25; display: flex; flex-direction: column; }
+      .a2hs-hint .a2hs-text span { color: var(--text-muted); font-size: .78rem; }
+      .a2hs-hint .a2hs-x {
+        background: none; border: none; color: var(--text-muted);
+        font-size: 1.5rem; line-height: 1; padding: 0 4px; flex-shrink: 0;
       }
 
       /* ── Sheet-style modals ─────────────────────────────────── */
@@ -820,6 +863,18 @@
   {% endif %}
 </nav>
 
+<!-- Add-to-Home-Screen hint: shown by JS only on mobile browsers that aren't
+     already running the installed (standalone) app, and not yet dismissed. -->
+<div id="a2hs-hint" class="a2hs-hint">
+  <i class="bi bi-phone a2hs-icon"></i>
+  <div class="a2hs-text">
+    <strong>Install Card Benefits</strong>
+    <span id="a2hs-instr"></span>
+  </div>
+  <button type="button" id="a2hs-install" class="btn btn-sm btn-primary" hidden>Install</button>
+  <button type="button" id="a2hs-dismiss" class="a2hs-x" aria-label="Dismiss">&times;</button>
+</div>
+
 {% with messages = get_flashed_messages(with_categories=true) %}
   {% if messages %}
   <div class="toast-container flash-toasts position-fixed top-0 start-50 translate-middle-x p-3">
@@ -857,6 +912,48 @@
   document.querySelectorAll('.flash-toasts .toast').forEach(function(el) {
     new bootstrap.Toast(el).show();
   });
+
+  // ── Add-to-Home-Screen hint ──────────────────────────────────────────────
+  (function() {
+    var hint = document.getElementById('a2hs-hint');
+    if (!hint) return;
+    var standalone = window.matchMedia('(display-mode: standalone)').matches
+                  || window.navigator.standalone === true;
+    if (standalone) return;                                  // already installed
+    if (localStorage.getItem('cb-a2hs-dismissed')) return;   // user dismissed it
+
+    var instr      = document.getElementById('a2hs-instr');
+    var installBtn = document.getElementById('a2hs-install');
+    var dismissBtn = document.getElementById('a2hs-dismiss');
+    var deferred   = null;
+    function show() { hint.classList.add('a2hs-show'); }
+    function hide(remember) {
+      hint.classList.remove('a2hs-show');
+      if (remember) localStorage.setItem('cb-a2hs-dismissed', '1');
+    }
+    dismissBtn.addEventListener('click', function() { hide(true); });
+
+    // Android/Chrome: capture the native prompt and offer a one-tap Install.
+    window.addEventListener('beforeinstallprompt', function(e) {
+      e.preventDefault();
+      deferred = e;
+      instr.textContent = 'Add it to your home screen for a full-screen app.';
+      installBtn.hidden = false;
+      show();
+    });
+    installBtn.addEventListener('click', function() {
+      if (!deferred) return;
+      deferred.prompt();
+      deferred.userChoice.finally(function() { deferred = null; hide(true); });
+    });
+    window.addEventListener('appinstalled', function() { hide(true); });
+
+    // iOS Safari has no install API — show the manual Share→Add instructions.
+    if (/iPhone|iPad|iPod/.test(navigator.userAgent) && !window.MSStream) {
+      instr.textContent = 'Tap the Share icon, then “Add to Home Screen”.';
+      show();
+    }
+  })();
 </script>
 {% block scripts %}{% endblock %}
 </body>
