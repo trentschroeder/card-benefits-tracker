@@ -3182,9 +3182,12 @@ def _run_reminder_check(force=False):
         db.close()
         return 0
 
+    # Honour the per-user reminders_enabled flag: a user who has turned reminder
+    # emails off gets neither benefit reminders nor offer reminders/footers.
     users = db.execute('''
         SELECT id, email, notification_email
         FROM users
+        WHERE reminders_enabled = 1
     ''').fetchall()
 
     base_url = (get_setting(db, 'app_base_url', APP_BASE_URL) or APP_BASE_URL).rstrip('/')
