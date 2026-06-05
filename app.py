@@ -14,7 +14,8 @@ from werkzeug.security import check_password_hash, generate_password_hash
 
 from periods import get_current_period, days_left, PERIOD_LABELS
 from email_sender import (send_reminder_email, send_invite_email,
-                           send_reset_email, send_share_invite_email)
+                           send_reset_email, send_share_invite_email,
+                           send_card_request_email)
 
 app = Flask(__name__)
 
@@ -1429,6 +1430,51 @@ def add_card():
     return render_template('add_card.html', cards=rows)
 
 
+@app.route('/add-card/request', methods=['POST'])
+@login_required
+def card_request():
+    """A user asks for a card that's not in the catalog yet. Stored for admins
+    to action on the Card Templates page, and emailed to them (best-effort)."""
+    name  = request.form.get('card_name', '').strip()
+    notes = request.form.get('notes', '').strip() or None
+    if not name:
+        flash('Enter the name of the card you want.', 'danger')
+        return redirect(url_for('add_card'))
+    db = get_db()
+    db.execute('INSERT INTO card_requests (user_id, card_name, notes) VALUES (?, ?, ?)',
+               (g.user['id'], name, notes))
+    db.commit()
+    gmail_user = get_setting(db, 'gmail_user')
+    gmail_pass = get_setting(db, 'gmail_app_password')
+    base = (get_setting(db, 'app_base_url', APP_BASE_URL) or APP_BASE_URL).rstrip('/')
+    admins = [r['email'] for r in db.execute(
+        'SELECT COALESCE(notification_email, email) AS email FROM users WHERE is_admin = 1'
+    ).fetchall() if r['email']]
+    db.close()
+    if gmail_user and gmail_pass and admins:
+        try:
+            send_card_request_email(gmail_user, gmail_pass, admins, g.user['email'],
+                                    name, notes, f'{base}/card-templates')
+        except Exception as e:
+            app.logger.error(f'Card request email failed: {e}')
+    flash('Thanks! Your request was sent to the admin.', 'success')
+    return redirect(url_for('add_card'))
+
+
+@app.route('/card-requests/<int:req_id>/resolve', methods=['POST'])
+@admin_required
+def card_request_resolve(req_id):
+    status = request.form.get('status', 'done')
+    if status not in ('done', 'dismissed'):
+        status = 'done'
+    db = get_db()
+    db.execute('UPDATE card_requests SET status = ? WHERE id = ?', (status, req_id))
+    db.commit()
+    db.close()
+    flash('Request updated.', 'success')
+    return redirect(url_for('card_templates'))
+
+
 @app.route('/card-templates')
 @admin_required
 def card_templates():
@@ -1443,8 +1489,14 @@ def card_templates():
         FROM cards c
         ORDER BY c.active DESC, c.published DESC, c.name
     ''').fetchall()
+    requests = db.execute('''
+        SELECT cr.id, cr.card_name, cr.notes, cr.created_at, u.email AS requester
+        FROM card_requests cr JOIN users u ON u.id = cr.user_id
+        WHERE cr.status = 'open'
+        ORDER BY cr.created_at DESC
+    ''').fetchall()
     db.close()
-    return render_template('card_templates.html', cards=rows)
+    return render_template('card_templates.html', cards=rows, requests=requests)
 
 
 @app.route('/card-templates/<int:card_id>/add', methods=['POST'])

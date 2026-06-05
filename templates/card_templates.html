@@ -12,6 +12,39 @@
   </a>
 </div>
 
+{% if requests %}
+<div class="card p-3 p-md-4 mb-4 border-warning">
+  <h5 class="mb-3"><i class="bi bi-inbox me-2"></i>Card requests
+    <span class="badge bg-warning text-dark ms-1">{{ requests|length }}</span></h5>
+  <div class="table-responsive">
+    <table class="table align-middle mb-0">
+      <thead><tr><th>Card</th><th>Requested by</th><th>Notes</th><th>When</th><th></th></tr></thead>
+      <tbody>
+        {% for r in requests %}
+        <tr>
+          <td class="fw-semibold">{{ r.card_name }}</td>
+          <td class="small text-muted">{{ r.requester }}</td>
+          <td class="small text-muted">{{ r.notes or '—' }}</td>
+          <td class="small text-muted text-nowrap">{{ r.created_at }}</td>
+          <td class="text-nowrap">
+            <form method="post" action="{{ url_for('card_request_resolve', req_id=r.id) }}" class="d-inline">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button name="status" value="done" class="btn btn-outline-success btn-sm" title="Mark handled">
+                <i class="bi bi-check-lg"></i>
+              </button>
+              <button name="status" value="dismissed" class="btn btn-outline-secondary btn-sm" title="Dismiss">
+                <i class="bi bi-x-lg"></i>
+              </button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
 {% if not cards %}
   <div class="text-center py-5 text-muted">
     <i class="bi bi-collection display-4 mb-3 d-block"></i>

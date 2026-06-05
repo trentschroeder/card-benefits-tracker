@@ -219,3 +219,36 @@ def send_reminder_email(gmail_user, gmail_app_password, recipient, benefits_due)
     with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
         server.login(gmail_user, gmail_app_password)
         server.sendmail(gmail_user, recipient, msg.as_string())
+
+
+def send_card_request_email(gmail_user, gmail_app_password, recipients,
+                            requester, card_name, notes, manage_url):
+    """Notify admins that a user requested a card not yet in the catalog."""
+    if not recipients:
+        return
+    subject = f"Card request: {card_name}"
+    notes_html = (f'<p style="margin:4px 0 0;color:#555;">“{escape(notes)}”</p>'
+                  if notes else '')
+    html = f"""
+    <html><body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#333;max-width:560px;">
+      <h2 style="color:#1a3c8a;">New card request</h2>
+      <p><strong>{escape(requester)}</strong> asked for a card that isn't in the catalog yet:</p>
+      <p style="font-size:1.1rem;font-weight:600;margin:8px 0;">{escape(card_name)}</p>
+      {notes_html}
+      <p style="margin:24px 0;">
+        <a href="{manage_url}" style="background:#1a3c8a;color:#fff;text-decoration:none;
+            padding:12px 22px;border-radius:6px;font-weight:600;display:inline-block;">
+          Review in Card Templates
+        </a>
+      </p>
+    </body></html>
+    """
+    msg = MIMEMultipart('alternative')
+    msg['Subject'] = subject
+    msg['From']    = gmail_user
+    msg['To']      = ', '.join(recipients)
+    msg.attach(MIMEText(html, 'html'))
+
+    with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
+        server.login(gmail_user, gmail_app_password)
+        server.sendmail(gmail_user, recipients, msg.as_string())

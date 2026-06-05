@@ -1,0 +1,7 @@
+[Unit]
+Description=Back up the credit-card-benefits SQLite database
+
+[Service]
+Type=oneshot
+WorkingDirectory=/var/www/credit-card-benefits
+ExecStart=/var/www/credit-card-benefits/venv/bin/python backup_db.py

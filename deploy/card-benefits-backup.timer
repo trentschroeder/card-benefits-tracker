@@ -1,0 +1,10 @@
+[Unit]
+Description=Nightly credit-card-benefits database backup
+
+[Timer]
+OnCalendar=*-*-* 03:30:00
+Persistent=true
+Unit=card-benefits-backup.service
+
+[Install]
+WantedBy=timers.target

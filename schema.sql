@@ -148,6 +148,18 @@ CREATE TABLE IF NOT EXISTS settings (
     value   TEXT
 );
 
+-- Users can request a card that isn't in the catalog yet; admins see open
+-- requests on the Card Templates page and mark them handled/dismissed.
+CREATE TABLE IF NOT EXISTS card_requests (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id     INTEGER NOT NULL,
+    card_name   TEXT    NOT NULL,
+    notes       TEXT,
+    status      TEXT    NOT NULL DEFAULT 'open',  -- open | done | dismissed
+    created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
 CREATE INDEX IF NOT EXISTS idx_benefits_card   ON benefits(card_id);
 CREATE INDEX IF NOT EXISTS idx_benefit_default_reminders ON benefit_default_reminders(benefit_id);
 CREATE INDEX IF NOT EXISTS idx_user_cards_user ON user_cards(user_id, active);
