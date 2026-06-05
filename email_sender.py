@@ -10,7 +10,7 @@ def send_share_invite_email(gmail_user, gmail_app_password, recipient, accept_ur
     html = f"""
     <html><body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#333;max-width:560px;">
       <h2 style="color:#1a3c8a;">Card share invitation</h2>
-      <p><strong>{inviter_email}</strong> wants to share <strong>{card_name}</strong> with you on Card Benefits.</p>
+      <p><strong>{escape(inviter_email)}</strong> wants to share <strong>{escape(card_name)}</strong> with you on Card Benefits.</p>
       <p>If you accept, you'll both pool redemptions on this card — each of you will see everything the other has logged, and either of you can add, edit, or delete redemptions. Your reminder preferences stay personal.</p>
       <p style="margin:24px 0;">
         <a href="{accept_url}" style="background:#1a3c8a;color:#fff;text-decoration:none;
@@ -44,7 +44,7 @@ def send_reset_email(gmail_user, gmail_app_password, recipient, reset_url):
     html = f"""
     <html><body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#333;max-width:560px;">
       <h2 style="color:#1a3c8a;">Reset your password</h2>
-      <p>Someone (hopefully you) requested a password reset for <strong>{recipient}</strong>.</p>
+      <p>Someone (hopefully you) requested a password reset for <strong>{escape(recipient)}</strong>.</p>
       <p>Click the button below to set a new password. The link expires in 24 hours.</p>
       <p style="margin:24px 0;">
         <a href="{reset_url}" style="background:#1a3c8a;color:#fff;text-decoration:none;
@@ -78,7 +78,7 @@ def send_invite_email(gmail_user, gmail_app_password, recipient, accept_url, inv
     html = f"""
     <html><body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#333;max-width:560px;">
       <h2 style="color:#1a3c8a;">You're invited to Card Benefits</h2>
-      <p><strong>{inviter_email}</strong> has invited you to track your credit card benefits and redemptions.</p>
+      <p><strong>{escape(inviter_email)}</strong> has invited you to track your credit card benefits and redemptions.</p>
       <p>Click the button below to set your password and get started. This link is good for 7 days.</p>
       <p style="margin:24px 0;">
         <a href="{accept_url}" style="background:#1a3c8a;color:#fff;text-decoration:none;

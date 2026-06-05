@@ -4,6 +4,7 @@ import json
 import os
 import secrets
 import sqlite3
+import time
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
@@ -63,6 +64,38 @@ def _ensure_csrf_token():
 @app.context_processor
 def _inject_csrf_token():
     return {'csrf_token': _ensure_csrf_token}
+
+
+# ── Lightweight rate limiting ────────────────────────────────────────────────
+# Prod runs a single gunicorn worker, so an in-process store is enough. Keyed by
+# real client IP (nginx forwards it as X-Real-IP). Used to throttle the
+# unauthenticated POST endpoints (login, signup, password reset).
+_rate_hits = {}
+
+
+def _client_ip():
+    return request.headers.get('X-Real-IP') or request.remote_addr or 'unknown'
+
+
+def _rate_limited(bucket, max_hits, window_seconds):
+    """Record a hit for (bucket, client-IP) and return True if it now exceeds
+    max_hits within the trailing window."""
+    key = (bucket, _client_ip())
+    now = time.time()
+    hits = [t for t in _rate_hits.get(key, []) if now - t < window_seconds]
+    hits.append(now)
+    _rate_hits[key] = hits
+    return len(hits) > max_hits
+
+
+@app.errorhandler(404)
+def _handle_404(e):
+    return render_template('404.html'), 404
+
+
+@app.errorhandler(500)
+def _handle_500(e):
+    return render_template('500.html'), 500
 
 
 @app.before_request
@@ -898,6 +931,9 @@ def login():
         return redirect(url_for('dashboard'))
     error = None
     if request.method == 'POST':
+        if _rate_limited('login', 10, 300):
+            flash('Too many sign-in attempts — please wait a few minutes and try again.', 'danger')
+            return redirect(url_for('login'))
         email    = request.form.get('email', '').strip()
         password = request.form.get('password', '')
         if email and password:
@@ -944,6 +980,10 @@ def signup():
     error = None
     email = ''
     if request.method == 'POST':
+        if _rate_limited('signup', 5, 900):
+            db.close()
+            flash('Too many attempts — please wait a few minutes and try again.', 'danger')
+            return redirect(url_for('signup'))
         email    = request.form.get('email', '').strip()
         password = request.form.get('password', '')
         confirm  = request.form.get('confirm_password', '')
@@ -956,17 +996,24 @@ def signup():
         elif db.execute('SELECT id FROM users WHERE email = ?', (email,)).fetchone():
             error = 'An account with that email already exists — try signing in.'
         if error is None:
-            cur = db.execute(
-                'INSERT INTO users (email, password_hash, is_admin) VALUES (?, ?, 0)',
-                (email, generate_password_hash(password)))
-            uid = cur.lastrowid
-            db.commit()
-            db.close()
-            session.clear()
-            session['user_id']  = uid
-            session.permanent   = True
-            flash('Welcome! Add your first card to get started.', 'success')
-            return redirect(url_for('dashboard'))
+            try:
+                cur = db.execute(
+                    'INSERT INTO users (email, password_hash, is_admin) VALUES (?, ?, 0)',
+                    (email, generate_password_hash(password)))
+                uid = cur.lastrowid
+                db.commit()
+            except sqlite3.IntegrityError:
+                # Email is UNIQUE COLLATE NOCASE — catch the race / case variant
+                # the pre-check can miss, instead of 500-ing.
+                db.rollback()
+                error = 'An account with that email already exists — try signing in.'
+            else:
+                db.close()
+                session.clear()
+                session['user_id']  = uid
+                session.permanent   = True
+                flash('Welcome! Add your first card to get started.', 'success')
+                return redirect(url_for('dashboard'))
 
     db.close()
     return render_template('signup.html', error=error, email=email)
@@ -1090,9 +1137,14 @@ def user_new():
         flash(f'A user with email {email} already exists.', 'danger')
         return redirect(url_for('users_list'))
     placeholder_hash = generate_password_hash(secrets.token_hex(32))
-    cur = db.execute(
-        'INSERT INTO users (email, password_hash, is_admin) VALUES (?, ?, ?)',
-        (email, placeholder_hash, is_admin))
+    try:
+        cur = db.execute(
+            'INSERT INTO users (email, password_hash, is_admin) VALUES (?, ?, ?)',
+            (email, placeholder_hash, is_admin))
+    except sqlite3.IntegrityError:
+        db.close()
+        flash(f'A user with email {email} already exists.', 'danger')
+        return redirect(url_for('users_list'))
     new_user_id = cur.lastrowid
     raw_token = _create_token(db, new_user_id, purpose='invite')
     db.commit()
@@ -1250,6 +1302,9 @@ def forgot_password():
     if g.get('user'):
         return redirect(url_for('dashboard'))
     if request.method == 'POST':
+        if _rate_limited('forgot', 5, 900):
+            flash('Too many requests — please wait a few minutes and try again.', 'danger')
+            return redirect(url_for('login'))
         email = request.form.get('email', '').strip()
         # Same flash regardless of whether the email exists, to prevent
         # account enumeration.
