@@ -954,6 +954,32 @@
       show();
     }
   })();
+
+  // ── Subscription redemption validation ────────────────────────────────────
+  // Require at least one complete bound (a start OR an end, each month+year),
+  // and don't allow a half-filled date. ("Log just one period" is intentionally
+  // hard — subscriptions are meant to span a range.)
+  document.querySelectorAll('select[name="redemption_start_month"]').forEach(function(sm) {
+    var form = sm.closest('form');
+    if (!form || form.dataset.subValidated) return;
+    form.dataset.subValidated = '1';
+    var f = function(n) { return form.querySelector('[name="' + n + '"]'); };
+    var fields = ['redemption_start_month', 'redemption_start_year',
+                  'redemption_end_month', 'redemption_end_year'].map(f);
+    fields.forEach(function(el) { el.addEventListener('change', function() { el.setCustomValidity(''); }); });
+    form.addEventListener('submit', function(e) {
+      fields.forEach(function(el) { el.setCustomValidity(''); });
+      var sM = f('redemption_start_month'), sY = f('redemption_start_year'),
+          eM = f('redemption_end_month'),   eY = f('redemption_end_year');
+      var startCount = (sM.value ? 1 : 0) + (sY.value ? 1 : 0);
+      var endCount   = (eM.value ? 1 : 0) + (eY.value ? 1 : 0);
+      var problem = null, target = null;
+      if (startCount === 1)      { problem = 'Pick both a month and a year for the start.'; target = sM.value ? sY : sM; }
+      else if (endCount === 1)   { problem = 'Pick both a month and a year for the end.';   target = eM.value ? eY : eM; }
+      else if (!startCount && !endCount) { problem = 'Enter the month and year the subscription began (or an end month).'; target = sM; }
+      if (problem) { e.preventDefault(); e.stopPropagation(); target.setCustomValidity(problem); form.reportValidity(); }
+    });
+  });
 </script>
 {% block scripts %}{% endblock %}
 </body>

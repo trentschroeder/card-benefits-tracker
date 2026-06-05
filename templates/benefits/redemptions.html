@@ -334,6 +334,14 @@
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <div class="modal-body">
           {% if benefit.is_subscription %}
+          <div class="alert alert-info d-flex gap-2 py-2 px-3 mb-3" style="font-size:.82rem;">
+            <i class="bi bi-arrow-repeat" style="font-size:1.05rem;line-height:1.3;"></i>
+            <div>
+              <strong>This benefit is a subscription</strong> — it renews {{ benefit.period_label|lower }}.
+              So you don't have to log each period by hand, set a start month, an end month, or both,
+              and we'll automatically record a redemption for every renewal period your subscription is active.
+            </div>
+          </div>
           {% if benefit.credit_amount %}
           <div class="mb-3">
             <label class="form-label">Amount per period ($)</label>
@@ -345,7 +353,7 @@
             <label class="form-label">Notes (optional)</label>
             <input name="notes" type="text" class="form-control" placeholder="e.g. Started subscription">
           </div>
-          <label class="form-label">From (optional)</label>
+          <label class="form-label">Start month</label>
           <div class="row g-2 mb-2">
             <div class="col-7">
               <select name="redemption_start_month" class="form-select">
@@ -364,7 +372,7 @@
               </select>
             </div>
           </div>
-          <label class="form-label">Through (optional)</label>
+          <label class="form-label">End month</label>
           <div class="row g-2">
             <div class="col-7">
               <select name="redemption_end_month" class="form-select">
@@ -383,7 +391,7 @@
               </select>
             </div>
           </div>
-          <div class="form-text mt-2">Leave blank to record the current period. Pick a month range to backfill past or future periods — one row per period.</div>
+          <div class="form-text mt-2">If this is an active subscription, enter the month and year it began and leave the end blank — we'll log a redemption for each renewal period since. Add an end only once it lapses.</div>
           {% else %}
           {% if benefit.credit_amount %}
           <div class="mb-3">
