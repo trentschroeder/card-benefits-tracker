@@ -2,6 +2,8 @@ import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
+from markupsafe import escape
+
 
 def send_share_invite_email(gmail_user, gmail_app_password, recipient, accept_url, inviter_email, card_name):
     subject = f"{inviter_email} wants to share a card with you"
@@ -114,52 +116,99 @@ def send_reminder_email(gmail_user, gmail_app_password, recipient, benefits_due)
     if not benefits_due:
         return
 
-    subject = f"Credit Card Benefits Reminder — {len(benefits_due)} benefit(s) need attention"
+    n = len(benefits_due)
+    subject = f"{n} benefit{'s' if n != 1 else ''} need attention before the deadline"
+    font = "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif"
 
-    html_rows = ""
+    blocks = ""
     for b in benefits_due:
-        card_label = b['card_name']
+        card_label    = escape(b['card_name'])
+        benefit_label = escape(b['benefit_name'])
+        days_left     = b['days_left']
+
+        urg = "#dc2626" if days_left <= 3 else ("#ea7317" if days_left <= 7 else "#16a34a")
+        pill = "Due today" if days_left <= 0 else f"{days_left} day{'s' if days_left != 1 else ''} left"
 
         if b['credit_amount']:
-            remaining = b['credit_amount'] - (b['amount_used'] or 0)
-            usage_str = f"${remaining:.2f} of ${b['credit_amount']:.2f} remaining"
+            used      = b['amount_used'] or 0
+            remaining = max(0.0, b['credit_amount'] - used)
+            pct       = min(100, max(0, int(used / b['credit_amount'] * 100)))
+            usage_str = f"${remaining:,.0f} of ${b['credit_amount']:,.0f} left"
+            bar_color = "#ea7317" if pct < 60 else "#16a34a"
+            # Filled portion (omitted at 0%), sitting on a track that's always shown.
+            fill = (f'<table role="presentation" width="{pct}%" cellpadding="0" cellspacing="0" border="0"><tr>'
+                    f'<td height="6" style="height:6px;background:{bar_color};border-radius:6px;font-size:0;line-height:6px;">&nbsp;</td>'
+                    f'</tr></table>') if pct > 0 else '&nbsp;'
+            bar_html = (
+                '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" '
+                'style="margin-top:5px;background:#eef1f6;border-radius:6px;"><tr>'
+                f'<td height="6" style="height:6px;font-size:0;line-height:6px;">{fill}</td>'
+                '</tr></table>'
+            )
         else:
-            usage_str = "Not yet used"
+            usage_str = "Not yet used this period"
+            bar_html  = ''
 
-        days_left = b['days_left']
-        urgency_color = "#c0392b" if days_left <= 3 else ("#e67e22" if days_left <= 7 else "#27ae60")
+        button = ''
+        if b.get('redeem_url'):
+            button = (
+                f'<div style="margin-top:14px;">'
+                f'<a href="{b["redeem_url"]}" style="background:#1a3c8a;color:#ffffff;text-decoration:none;'
+                f'font:600 14px {font};padding:10px 18px;border-radius:8px;display:inline-block;">'
+                f'&#10003;&nbsp; Mark redeemed</a></div>'
+            )
 
-        html_rows += f"""
-        <tr>
-          <td style="padding:8px 12px;">{card_label}</td>
-          <td style="padding:8px 12px;font-weight:600;">{b['benefit_name']}</td>
-          <td style="padding:8px 12px;">{usage_str}</td>
-          <td style="padding:8px 12px;">Ends {b['period_end']}</td>
-          <td style="padding:8px 12px;color:{urgency_color};font-weight:600;">{days_left} day(s) left</td>
-        </tr>
-        """
+        blocks += f"""
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
+               style="border:1px solid #e6eaf2;border-radius:10px;background:#ffffff;margin:0 0 14px;">
+          <tr><td style="padding:15px 16px;">
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+              <tr>
+                <td style="font:600 15px {font};color:#1a2233;">{benefit_label}</td>
+                <td align="right" style="white-space:nowrap;padding-left:10px;">
+                  <span style="background:{urg};color:#ffffff;font:700 11px {font};padding:4px 11px;border-radius:999px;white-space:nowrap;">{pill}</span>
+                </td>
+              </tr>
+            </table>
+            <div style="font:400 12px {font};color:#8a93a6;margin-top:3px;">{card_label} &middot; ends {b['period_end']}</div>
+            <div style="font:400 12px {font};color:#5b6472;margin-top:12px;">{usage_str}</div>
+            {bar_html}
+            {button}
+          </td></tr>
+        </table>"""
 
-    html = f"""
-    <html><body style="font-family:sans-serif;color:#333;">
-    <h2 style="color:#1a5c8a;">Credit Card Benefits Reminder</h2>
-    <p>The following benefits have unused credit and a reminder is due:</p>
-    <table style="border-collapse:collapse;width:100%;max-width:800px;">
-      <thead>
-        <tr style="background:#e9ecef;text-align:left;">
-          <th style="padding:8px 12px;">Card</th>
-          <th style="padding:8px 12px;">Benefit</th>
-          <th style="padding:8px 12px;">Remaining</th>
-          <th style="padding:8px 12px;">Period End</th>
-          <th style="padding:8px 12px;">Urgency</th>
-        </tr>
-      </thead>
-      <tbody>{html_rows}</tbody>
-    </table>
-    <p style="margin-top:20px;font-size:0.9em;color:#666;">
-      Log in to your <a href="https://cardbenefits.trentschroeder.com">Credit Card Benefits</a> dashboard to record usage.
-    </p>
-    </body></html>
-    """
+    preheader = f"{n} benefit{'s' if n != 1 else ''} with unused credit and a deadline coming up."
+    html = f"""<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#eef1f6;">
+  <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:#eef1f6;">{preheader}</div>
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#eef1f6;">
+    <tr><td align="center" style="padding:24px 12px;">
+      <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0"
+             style="width:600px;max-width:100%;background:#ffffff;border-radius:14px;overflow:hidden;border:1px solid #e1e6f0;">
+        <tr><td style="background:#1a3c8a;padding:20px 24px;">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+            <td style="font:700 18px {font};color:#ffffff;">&#128179;&nbsp; Card Benefits</td>
+            <td align="right" style="font:600 12px {font};color:#aac4ff;letter-spacing:.04em;text-transform:uppercase;">Reminder</td>
+          </tr></table>
+        </td></tr>
+        <tr><td style="padding:24px 24px 4px;">
+          <div style="font:700 19px {font};color:#1a2233;">{n} benefit{'s' if n != 1 else ''} need attention</div>
+          <div style="font:400 14px {font};color:#5b6472;margin-top:6px;line-height:1.5;">
+            These have unused credit with a deadline coming up. Tap <b>Mark redeemed</b> to log one in a single step.
+          </div>
+        </td></tr>
+        <tr><td style="padding:16px 24px 4px;">{blocks}</td></tr>
+        <tr><td style="padding:4px 24px 26px;">
+          <div style="border-top:1px solid #eef1f6;padding-top:16px;font:400 12px {font};color:#98a2b3;line-height:1.6;">
+            Sent by <a href="https://cardbenefits.trentschroeder.com" style="color:#1a3c8a;text-decoration:none;">Card Benefits</a>.
+            You can change a benefit's reminder schedule from its page in your wallet.
+          </div>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body></html>"""
 
     msg = MIMEMultipart('alternative')
     msg['Subject'] = subject

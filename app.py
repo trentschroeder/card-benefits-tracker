@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo
 
 from flask import (Flask, flash, g, jsonify, redirect, render_template,
                    request, send_from_directory, session, url_for)
+from itsdangerous import URLSafeTimedSerializer, BadData
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from periods import get_current_period, days_left, PERIOD_LABELS
@@ -73,6 +74,34 @@ def _csrf_protect():
     if not expected or not hmac.compare_digest(str(submitted), str(expected)):
         flash('Your session expired or the form was invalid — please try again.', 'danger')
         return redirect(request.referrer or url_for('dashboard'))
+
+
+# ── Signed "mark redeemed from email" links ──────────────────────────────────
+# Reminder emails carry a signed, expiring link that lets the recipient record a
+# redemption without logging in. The token (not a login) authorises the action
+# and is scoped to one instance/benefit/period, so it can't be forged or aimed
+# at another user's card. Clicking lands on a confirm page (a GET never mutates,
+# so mail-client link prefetch can't create phantom redemptions); the confirm
+# POST is CSRF-protected like every other form.
+APP_BASE_URL = 'https://cardbenefits.trentschroeder.com'
+REDEEM_TOKEN_MAX_AGE = 120 * 24 * 3600  # 120 days — covers the longest (annual) reminder lead
+
+
+def _redeem_serializer():
+    return URLSafeTimedSerializer(app.secret_key, salt='redeem-link')
+
+
+def _make_redeem_token(uc_id, benefit_id, period_start):
+    return _redeem_serializer().dumps([int(uc_id), int(benefit_id), str(period_start)])
+
+
+def _load_redeem_token(token):
+    """Return (uc_id, benefit_id, period_start) or None if invalid/expired."""
+    try:
+        uc_id, bid, ps = _redeem_serializer().loads(token, max_age=REDEEM_TOKEN_MAX_AGE)
+        return int(uc_id), int(bid), str(ps)
+    except (BadData, ValueError, TypeError):
+        return None
 
 
 def login_required(f):
@@ -2103,6 +2132,110 @@ def _resolve_target_uc_for_benefit(db, benefit_id, viewer_id, requested_uc=None)
     return fb['id'] if fb else None
 
 
+def _record_period_redemption(db, target_uc, benefit, period_start, amount, notes):
+    """Insert a single-period redemption unless the pool already has one for
+    that period. Returns True if a row was added, False if it already existed."""
+    pool = effective_user_card_ids(db, target_uc)
+    ph   = ','.join('?' * len(pool))
+    existing = db.execute(
+        f'SELECT id FROM redemptions WHERE user_card_id IN ({ph}) AND benefit_id = ? AND period_start = ?',
+        (*pool, benefit['id'], str(period_start))).fetchone()
+    if existing:
+        return False
+    db.execute(
+        'INSERT INTO redemptions (user_card_id, benefit_id, period_start, amount, notes) '
+        'VALUES (?, ?, ?, ?, ?)',
+        (target_uc, benefit['id'], str(period_start), amount, notes))
+    return True
+
+
+def _redeem_context(db, uc_id, bid, period_start):
+    """Resolve a redeem token's target to display fields + the benefit row, or
+    (None, None) if the instance/benefit is gone or inactive. Also reports
+    whether the period is already fully recorded (pool-aware)."""
+    uc = db.execute(
+        'SELECT uc.id, uc.nickname, uc.card_id, uc.active AS uc_active, '
+        'c.name AS card_name, c.active AS card_active '
+        'FROM user_cards uc JOIN cards c ON c.id = uc.card_id WHERE uc.id = ?',
+        (uc_id,)).fetchone()
+    if not uc or not uc['uc_active'] or not uc['card_active']:
+        return None, None
+    b = db.execute('SELECT * FROM benefits WHERE id = ? AND card_id = ? AND active = 1',
+                   (bid, uc['card_id'])).fetchone()
+    if not b:
+        return None, None
+
+    pool = effective_user_card_ids(db, uc_id)
+    ph   = ','.join('?' * len(pool))
+    if b['credit_amount']:
+        used = db.execute(
+            f'SELECT COALESCE(SUM(amount), 0) FROM redemptions WHERE user_card_id IN ({ph}) '
+            f'AND benefit_id = ? AND period_start = ?', (*pool, bid, period_start)).fetchone()[0]
+        already = used >= b['credit_amount']
+    else:
+        cnt = db.execute(
+            f'SELECT COUNT(*) FROM redemptions WHERE user_card_id IN ({ph}) '
+            f'AND benefit_id = ? AND period_start = ?', (*pool, bid, period_start)).fetchone()[0]
+        already = cnt > 0
+
+    period_end = None
+    try:
+        _, pe = get_current_period(b['period_type'], for_date=date.fromisoformat(period_start))
+        period_end = pe.strftime('%b %d, %Y')
+    except ValueError:
+        pass
+
+    info = {
+        'card_name':     uc['nickname'] or uc['card_name'],
+        'benefit_name':  b['name'],
+        'credit_amount': b['credit_amount'],
+        'period_label':  PERIOD_LABELS.get(b['period_type'], ''),
+        'period_end':    period_end,
+        'already':       already,
+    }
+    return info, b
+
+
+@app.route('/r/<token>', methods=['GET'])
+def redeem_link(token):
+    """Landing page for the signed redeem link in reminder emails. GET only
+    shows a confirmation — it never records anything (prefetch-safe)."""
+    data = _load_redeem_token(token)
+    if not data:
+        return render_template('redeem.html', state='invalid'), 400
+    db = get_db()
+    info, _ = _redeem_context(db, *data)
+    db.close()
+    if not info:
+        return render_template('redeem.html', state='invalid'), 400
+    return render_template('redeem.html',
+                           state='already' if info['already'] else 'confirm',
+                           token=token, **info)
+
+
+@app.route('/r/<token>', methods=['POST'])
+def redeem_link_confirm(token):
+    """Confirm POST from the redeem landing page. Authorised by the signed
+    token (no login) and CSRF-checked like every other form."""
+    data = _load_redeem_token(token)
+    if not data:
+        return render_template('redeem.html', state='invalid'), 400
+    uc_id, bid, period_start = data
+    db = get_db()
+    info, benefit = _redeem_context(db, uc_id, bid, period_start)
+    if not info:
+        db.close()
+        return render_template('redeem.html', state='invalid'), 400
+    if info['already']:
+        db.close()
+        return render_template('redeem.html', state='already', token=token, **info)
+    _record_period_redemption(db, uc_id, benefit, period_start,
+                              benefit['credit_amount'], 'Marked redeemed via email reminder')
+    db.commit()
+    db.close()
+    return render_template('redeem.html', state='done', token=token, **info)
+
+
 @app.route('/benefits/<int:id>/redeem', methods=['POST'])
 @login_required
 def benefit_redeem(id):
@@ -2556,6 +2689,71 @@ def send_summary():
     return redirect(back)
 
 
+@app.route('/email/test-reminder', methods=['POST'])
+@login_required
+def send_test_reminder():
+    """Email the current user a reminder built from their outstanding benefits,
+    so they can preview the reminder layout. Falls back to a sample row if
+    nothing is currently due. Admin may override the recipient for SMTP tests."""
+    db = get_db()
+    gmail_user = get_setting(db, 'gmail_user')
+    gmail_pass = get_setting(db, 'gmail_app_password')
+    if not all([gmail_user, gmail_pass]):
+        db.close()
+        flash('Gmail credentials are not configured. Ask the administrator to set them up.', 'danger')
+        return redirect(url_for('settings'))
+
+    uid       = g.user['id']
+    recipient = g.user['notification_email'] or g.user['email']
+    test_recipient = request.form.get('test_recipient', '').strip() or None
+    if test_recipient and g.user['is_admin']:
+        recipient = test_recipient
+
+    base_url = (get_setting(db, 'app_base_url', APP_BASE_URL) or APP_BASE_URL).rstrip('/')
+    rows = db.execute('''
+        SELECT b.*, c.name AS card_name, uc.id AS user_card_id, uc.nickname AS nickname
+        FROM benefits b
+        JOIN cards c       ON c.id      = b.card_id
+        JOIN user_cards uc ON uc.card_id = c.id
+        LEFT JOIN user_benefits ub ON ub.benefit_id = b.id AND ub.user_card_id = uc.id
+        WHERE uc.user_id = ? AND uc.active = 1 AND b.active = 1 AND c.active = 1
+              AND COALESCE(ub.active, 1) = 1
+    ''', (uid,)).fetchall()
+
+    due = []
+    for row in rows:
+        uc_id = row['user_card_id']
+        b = enrich_benefit(db, row, uc_id)
+        if b['fully_used'] or b['is_subscription']:
+            continue
+        due.append({
+            'card_name':     row['nickname'] or row['card_name'],
+            'benefit_name':  b['name'],
+            'credit_amount': b['credit_amount'],
+            'amount_used':   b['amount_used'],
+            'period_end':    b['period_end'].strftime('%b %d, %Y'),
+            'days_left':     b['days_left'],
+            'redeem_url':    f"{base_url}/r/{_make_redeem_token(uc_id, b['id'], str(b['period_start']))}",
+        })
+    db.close()
+
+    due.sort(key=lambda d: d['days_left'])
+    if not due:
+        due = [{
+            'card_name': 'Sample Card', 'benefit_name': 'Example $50 Credit',
+            'credit_amount': 50, 'amount_used': 0,
+            'period_end': date.today().strftime('%b %d, %Y'), 'days_left': 7,
+            'redeem_url': None,
+        }]
+
+    try:
+        send_reminder_email(gmail_user, gmail_pass, recipient, due)
+        flash(f'Test reminder sent to {recipient} — {len(due)} benefit(s).', 'success')
+    except Exception as e:
+        flash(f'Failed to send email: {e}', 'danger')
+    return redirect(url_for('settings'))
+
+
 # ── Reminder logic ─────────────────────────────────────────────────────────────
 
 def _run_reminder_check(force=False):
@@ -2577,6 +2775,7 @@ def _run_reminder_check(force=False):
         FROM users
     ''').fetchall()
 
+    base_url = (get_setting(db, 'app_base_url', APP_BASE_URL) or APP_BASE_URL).rstrip('/')
     total_sent = 0
 
     for user in users:
@@ -2623,6 +2822,7 @@ def _run_reminder_check(force=False):
                             'amount_used':   b['amount_used'],
                             'period_end':    b['period_end'].strftime('%b %d, %Y'),
                             'days_left':     dl,
+                            'redeem_url':    f"{base_url}/r/{_make_redeem_token(uc_id, b['id'], period_start_str)}",
                         })
                         if not already_sent:
                             db.execute(

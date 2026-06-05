@@ -1,0 +1,50 @@
+{% extends 'base.html' %}
+{% block title %}
+{%- if state == 'confirm' %}Mark redeemed{% elif state == 'done' %}Redeemed{% elif state == 'already' %}Already redeemed{% else %}Link expired{% endif %} — Card Benefits
+{%- endblock %}
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-sm-9 col-md-7 col-lg-5">
+    <div class="card p-4 mt-4 text-center">
+      {% if state == 'invalid' %}
+        <i class="bi bi-link-45deg display-4 text-muted mb-2"></i>
+        <h4 class="mb-2">Link expired or invalid</h4>
+        <p class="text-muted">This redeem link is no longer valid. Open your wallet to record it manually.</p>
+        <a href="{{ url_for('dashboard') }}" class="btn btn-primary mt-2">Go to My Wallet</a>
+
+      {% elif state == 'already' %}
+        <i class="bi bi-check-circle-fill display-4 text-success mb-2"></i>
+        <h4 class="mb-2">Already recorded</h4>
+        <p class="text-muted">
+          <strong>{{ benefit_name }}</strong> on <strong>{{ card_name }}</strong> is already
+          marked redeemed for this {{ period_label|lower }} period.
+        </p>
+        <a href="{{ url_for('dashboard') }}" class="btn btn-outline-primary mt-2">Open My Wallet</a>
+
+      {% elif state == 'done' %}
+        <i class="bi bi-check-circle-fill display-4 text-success mb-2"></i>
+        <h4 class="mb-2">Redeemed&nbsp;✓</h4>
+        <p class="text-muted">
+          Recorded <strong>{{ benefit_name }}</strong> on <strong>{{ card_name }}</strong>{% if credit_amount %}
+          for ${{ '%.2f'|format(credit_amount) }}{% endif %}.
+        </p>
+        <a href="{{ url_for('dashboard') }}" class="btn btn-primary mt-2">Open My Wallet</a>
+
+      {% else %}{# confirm #}
+        <i class="bi bi-stars display-4 text-primary mb-2"></i>
+        <h4 class="mb-1">Mark this benefit redeemed?</h4>
+        <p class="mb-1 fs-5"><strong>{{ benefit_name }}</strong></p>
+        <p class="text-muted mb-1">{{ card_name }}</p>
+        <p class="text-muted small mb-3">
+          {{ period_label }} period{% if period_end %} · ends {{ period_end }}{% endif %}{% if credit_amount %} · ${{ '%.2f'|format(credit_amount) }} credit{% endif %}
+        </p>
+        <form method="post" class="mt-2">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button class="btn btn-primary w-100"><i class="bi bi-check-lg me-1"></i>Yes, mark redeemed</button>
+        </form>
+        <a href="{{ url_for('dashboard') }}" class="btn btn-link mt-2">Open My Wallet instead</a>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}
