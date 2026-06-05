@@ -8,7 +8,7 @@
 </div>
 <p class="text-muted small mb-4">
   {% if benefit %}This is the canonical record for the benefit on <strong>{{ card.name }}</strong>. Changes here apply to every user who has the card.
-  {% else %}Adding a benefit to <strong>{{ card.name }}</strong>. It will appear on every user's dashboard that has this card.
+  {% else %}Adding a benefit to <strong>{{ card.name }}</strong>. It will appear on every user's wallet that has this card.
   {% endif %}
   Per-user reminder schedules live separately on each card instance.
 </p>
@@ -80,7 +80,7 @@
       <input name="active" type="checkbox" class="form-check-input" id="activeCheck"
              {% if form.get('active', 1) %}checked{% endif %}>
       <label class="form-check-label" for="activeCheck">Active in catalog</label>
-      <div class="form-text">When off, this benefit disappears from every user's dashboard. Use this for retired or never-launched benefits.</div>
+      <div class="form-text">When off, this benefit disappears from every user's wallet. Use this for retired or never-launched benefits.</div>
     </div>
 
     <div class="d-flex gap-2 mt-4">

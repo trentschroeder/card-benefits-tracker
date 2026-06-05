@@ -5,11 +5,11 @@
 <div class="d-flex justify-content-between align-items-center mb-4">
   <h2 class="mb-0"><i class="bi bi-collection me-2"></i>Add a Card</h2>
   <a href="{{ url_for('dashboard') }}" class="btn btn-outline-secondary btn-sm">
-    <i class="bi bi-arrow-left me-1"></i>Back to dashboard
+    <i class="bi bi-arrow-left me-1"></i>Back to my wallet
   </a>
 </div>
 
-<p class="text-muted">Pick a card to add to your dashboard. You can hold more than one of the same card — each one tracks its own redemptions.</p>
+<p class="text-muted">Pick a card to add to your wallet. You can hold more than one of the same card — each one tracks its own redemptions.</p>
 
 {% if not cards %}
   <div class="text-center py-5 text-muted">
@@ -25,7 +25,7 @@
         <h5 class="mb-0">{{ c.name }}</h5>
         {% if c.my_count and c.my_count > 0 %}
         <span class="badge bg-success" title="You already have this">
-          <i class="bi bi-check me-1"></i>{{ c.my_count }} on your dashboard
+          <i class="bi bi-check me-1"></i>{{ c.my_count }} in your wallet
         </span>
         {% endif %}
       </div>

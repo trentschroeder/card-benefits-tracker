@@ -10,8 +10,8 @@
 </div>
 <p class="text-muted small mb-4">
   This is the canonical record for the card. Changes here flow to every user
-  who has it on their dashboard. There are currently <strong>{{ n_instances }}</strong>
-  instance{{ '' if n_instances == 1 else 's' }} on user dashboards.
+  who has it in their wallet. There are currently <strong>{{ n_instances }}</strong>
+  instance{{ '' if n_instances == 1 else 's' }} in user wallets.
 </p>
 
 <details class="card p-3 mb-4" open>
@@ -33,13 +33,13 @@
         <input name="active" type="checkbox" class="form-check-input" id="activeCheck"
                {% if card.active %}checked{% endif %}>
         <label class="form-check-label" for="activeCheck">Active in catalog</label>
-        <div class="form-text">Off retires this card across every user's dashboard. Leave on unless the card itself is dead.</div>
+        <div class="form-text">Off retires this card across every user's wallet. Leave on unless the card itself is dead.</div>
       </div>
       <div class="col-12 form-check ms-1">
         <input name="published" type="checkbox" class="form-check-input" id="publishedCheck"
                {% if card.published %}checked{% endif %}>
         <label class="form-check-label" for="publishedCheck">Published</label>
-        <div class="form-text">When on, this card appears on the Add a Card page for users to add to their dashboards.</div>
+        <div class="form-text">When on, this card appears on the Add a Card page for users to add to their wallets.</div>
       </div>
     </div>
     <div class="d-flex gap-2 mt-3">
@@ -106,7 +106,7 @@
       </div>
       <div class="modal-body">
         Delete <strong>{{ card.name }}</strong> from the catalog and remove it
-        from every user's dashboard, along with all benefits and redemption
+        from every user's wallet, along with all benefits and redemption
         history ({{ n_instances }} instance{{ '' if n_instances == 1 else 's' }})?
         This cannot be undone.
       </div>

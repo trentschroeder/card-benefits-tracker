@@ -1391,10 +1391,10 @@ def card_templates_add(card_id):
     db.close()
     label = nickname or card['name']
     if seeded:
-        flash(f'Added "{label}" to your dashboard with default reminders — '
+        flash(f'Added "{label}" to your wallet with default reminders — '
               'adjust them on each benefit.', 'success')
     else:
-        flash(f'Added "{label}" to your dashboard.', 'success')
+        flash(f'Added "{label}" to your wallet.', 'success')
     return redirect(url_for('card_detail', id=new_uc_id))
 
 
@@ -1417,7 +1417,7 @@ def card_share(id):
         (id, uid)).fetchone()
     if not my_uc:
         db.close()
-        flash('You can only share a card that is on your own dashboard.', 'danger')
+        flash('You can only share a card that is in your own wallet.', 'danger')
         return redirect(url_for('dashboard'))
 
     invitee = db.execute('SELECT id, email FROM users WHERE email = ?', (raw_email,)).fetchone()
@@ -1607,12 +1607,12 @@ def card_remove(id):
     ''', (id, g.user['id'])).fetchone()
     if not row:
         db.close()
-        flash('Card not found on your dashboard.', 'danger')
+        flash('Card not found in your wallet.', 'danger')
         return redirect(url_for('dashboard'))
     db.execute('UPDATE user_cards SET active = 0 WHERE id = ?', (row['id'],))
     db.commit()
     db.close()
-    flash(f'"{row["label"]}" removed from your dashboard.', 'success')
+    flash(f'"{row["label"]}" removed from your wallet.', 'success')
     return redirect(url_for('dashboard'))
 
 

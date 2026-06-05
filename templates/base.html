@@ -739,7 +739,7 @@
         <li class="nav-item">
           <a class="nav-link {% if request.path == '/' %}active{% endif %}"
              href="{{ url_for('dashboard') }}">
-            <i class="bi bi-speedometer2 me-1"></i>Dashboard
+            <i class="bi bi-wallet2 me-1"></i>My Wallet
           </a>
         </li>
         {% if g.user and g.user.is_admin %}
@@ -801,8 +801,8 @@
 <nav class="mobile-tabbar" role="navigation" aria-label="Primary">
   <a class="tab-item {% if request.path == '/' %}active{% endif %}"
      href="{{ url_for('dashboard') }}">
-    <i class="bi bi-speedometer2"></i>
-    <span>Dashboard</span>
+    <i class="bi bi-wallet2"></i>
+    <span>My Wallet</span>
   </a>
   {% if g.user %}
   <a class="tab-item {% if request.path == '/settings' %}active{% endif %}"
