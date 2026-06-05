@@ -164,6 +164,47 @@
       </ul>
     </div>
     {% endif %}
+
+    <!-- Close account (every user) -->
+    <div class="card p-4 mb-4 border-danger">
+      <h5 class="mb-3 text-danger"><i class="bi bi-exclamation-octagon me-2"></i>Close Account</h5>
+      <p class="text-muted small mb-3">
+        Permanently delete your account and everything in it — your cards, redemption
+        history, and reminders. This can't be undone. You're welcome to sign up again later.
+      </p>
+      <button type="button" class="btn btn-outline-danger"
+              data-bs-toggle="modal" data-bs-target="#closeAccountModal">
+        <i class="bi bi-trash me-1"></i>Close my account
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- Close-account confirmation -->
+<div class="modal fade" id="closeAccountModal" tabindex="-1">
+  <div class="modal-dialog modal-sm">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h6 class="modal-title text-danger">Close your account?</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <form method="post" action="{{ url_for('account_close') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="modal-body">
+          <p class="small mb-3">
+            This permanently deletes your account and all of your cards, redemption
+            history, and reminders. <strong>This cannot be undone.</strong>
+          </p>
+          <label class="form-label">Confirm your password</label>
+          <input name="current_password" type="password" class="form-control"
+                 autocomplete="current-password" required>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+          <button class="btn btn-danger btn-sm"><i class="bi bi-trash me-1"></i>Delete everything</button>
+        </div>
+      </form>
+    </div>
   </div>
 </div>
 

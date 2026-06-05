@@ -2575,6 +2575,36 @@ def change_password():
     return redirect(url_for('settings'))
 
 
+@app.route('/account/close', methods=['POST'])
+@login_required
+def account_close():
+    """Self-service account deletion. Removes the user row, which cascades to
+    their cards, redemptions, reminders, sent_reminders, user_benefits, share
+    memberships, and invitations (ON DELETE CASCADE, with foreign_keys ON in
+    get_db). The email is freed, so they can sign up again later."""
+    if g.impersonator:
+        flash('Exit impersonation before closing an account.', 'danger')
+        return redirect(url_for('settings'))
+    if not check_password_hash(g.user['password_hash'], request.form.get('current_password', '')):
+        flash('Password is incorrect — your account was not closed.', 'danger')
+        return redirect(url_for('settings'))
+
+    db = get_db()
+    if g.user['is_admin']:
+        admin_count = db.execute('SELECT COUNT(*) FROM users WHERE is_admin = 1').fetchone()[0]
+        if admin_count <= 1:
+            db.close()
+            flash('You are the only admin — promote another user to admin before closing your account.', 'danger')
+            return redirect(url_for('settings'))
+
+    db.execute('DELETE FROM users WHERE id = ?', (g.user['id'],))
+    db.commit()
+    db.close()
+    session.clear()
+    flash('Your account and all of its data have been deleted. You can sign up again any time.', 'success')
+    return redirect(url_for('login'))
+
+
 @app.route('/settings', methods=['GET', 'POST'])
 @login_required
 def settings():
