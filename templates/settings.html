@@ -31,6 +31,35 @@
       </form>
     </div>
 
+    <!-- Linked account (every user) -->
+    <div class="card p-4 mb-4">
+      <h5 class="mb-3"><i class="bi bi-link-45deg me-2"></i>Linked Account</h5>
+      {% if linked_partner_email %}
+        <p class="mb-2">
+          <i class="bi bi-check-circle-fill text-success me-1"></i>
+          Linked with <strong>{{ linked_partner_email }}</strong>.
+        </p>
+        <p class="text-muted small mb-0">
+          You share one wallet — all cards, benefits, redemptions, and offers are shared,
+          and you each get your own reminder emails. Unlinking isn't available yet.
+        </p>
+      {% else %}
+        <p class="text-muted small">
+          Link with another account to share <strong>everything</strong> — cards, benefits,
+          redemptions, and offers become one shared wallet. You each keep your own login and
+          reminder email. The other person must already have an account.
+        </p>
+        <form method="post" action="{{ url_for('link_account') }}" class="d-flex gap-2 flex-wrap">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <input name="email" type="email" class="form-control" style="max-width:320px;"
+                 placeholder="partner@example.com" required autocomplete="off">
+          <button class="btn btn-primary">
+            <i class="bi bi-envelope-plus me-1"></i>Send link invitation
+          </button>
+        </form>
+      {% endif %}
+    </div>
+
     {% if g.user.is_admin %}
     <!-- System email delivery + schedule (admin only) -->
     <div class="card p-4 mb-4">

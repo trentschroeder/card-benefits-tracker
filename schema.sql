@@ -6,7 +6,17 @@ CREATE TABLE IF NOT EXISTS users (
     notification_email TEXT,
     reminders_enabled  INTEGER NOT NULL DEFAULT 1,
     summary_enabled    INTEGER NOT NULL DEFAULT 1,
+    -- Account linking: two accounts that link share one wallet (cards, benefits,
+    -- redemptions, offers). NULL = solo. Both linked users carry the same group id.
+    link_group_id      INTEGER REFERENCES account_link_groups(id) ON DELETE SET NULL,
     created_at         TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- A pair of linked accounts. Membership lives on users.link_group_id; this table
+-- just allocates the shared id (mirrors the card_share_groups idiom one level up).
+CREATE TABLE IF NOT EXISTS account_link_groups (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS cards (
@@ -197,6 +207,37 @@ CREATE TABLE IF NOT EXISTS offer_sent_reminders (
     FOREIGN KEY (offer_id) REFERENCES offers(id) ON DELETE CASCADE
 );
 
+-- Per-recipient reminder dedup. With account linking, BOTH linked users are
+-- emailed about the same shared card/offer, so dedup must be keyed by recipient
+-- (the older sent_reminders/offer_sent_reminders tables keyed only by the item
+-- and so could not represent "sent to A but not yet to B"). These supersede them.
+CREATE TABLE IF NOT EXISTS reminder_sends (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    recipient_user_id INTEGER NOT NULL,
+    user_card_id      INTEGER NOT NULL,
+    benefit_id        INTEGER NOT NULL,
+    period_start      DATE    NOT NULL,
+    days_before       INTEGER NOT NULL,
+    sent_at           TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(recipient_user_id, user_card_id, benefit_id, period_start, days_before),
+    FOREIGN KEY (recipient_user_id) REFERENCES users(id)      ON DELETE CASCADE,
+    FOREIGN KEY (user_card_id)      REFERENCES user_cards(id) ON DELETE CASCADE,
+    FOREIGN KEY (benefit_id)        REFERENCES benefits(id)   ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS offer_reminder_sends (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    recipient_user_id INTEGER NOT NULL,
+    offer_id          INTEGER NOT NULL,
+    days_before       INTEGER NOT NULL,
+    sent_at           TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(recipient_user_id, offer_id, days_before),
+    FOREIGN KEY (recipient_user_id) REFERENCES users(id)   ON DELETE CASCADE,
+    FOREIGN KEY (offer_id)          REFERENCES offers(id)  ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_reminder_sends ON reminder_sends(recipient_user_id, user_card_id, benefit_id, period_start);
+CREATE INDEX IF NOT EXISTS idx_offer_reminder_sends ON offer_reminder_sends(recipient_user_id, offer_id);
 CREATE INDEX IF NOT EXISTS idx_offers_user   ON offers(user_id, archived);
 CREATE INDEX IF NOT EXISTS idx_offer_reminders ON offer_reminders(offer_id);
 CREATE INDEX IF NOT EXISTS idx_benefits_card   ON benefits(card_id);

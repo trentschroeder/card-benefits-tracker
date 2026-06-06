@@ -15,7 +15,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 
 from periods import get_current_period, days_left, PERIOD_LABELS
 from email_sender import (send_reminder_email, send_invite_email,
-                           send_reset_email, send_share_invite_email,
+                           send_reset_email, send_link_invite_email,
                            send_card_request_email)
 
 app = Flask(__name__)
@@ -215,6 +215,9 @@ def init_db():
         ('notification_email', 'TEXT'),
         ('reminders_enabled',  'INTEGER NOT NULL DEFAULT 1'),
         ('summary_enabled',    'INTEGER NOT NULL DEFAULT 1'),
+        # Account linking. NULL default keeps the REFERENCES clause legal for
+        # ALTER ADD COLUMN; account_link_groups was created by executescript above.
+        ('link_group_id',      'INTEGER REFERENCES account_link_groups(id) ON DELETE SET NULL'),
     ]:
         try:
             db.execute(f'ALTER TABLE users ADD COLUMN {col} {decl}')
@@ -287,6 +290,92 @@ def _backfill_benefit_default_reminders(db):
         db.commit()
     except Exception:
         pass
+
+
+def _migrate_card_shares_to_account_links(db):
+    """ONE-TIME, MANUAL migration — run over SSH after deploy, NOT from init_db
+    (which has a documented startup write race). Converts the retired card-level
+    sharing into account-level links:
+
+      1. Backfill the new per-recipient dedup tables (reminder_sends,
+         offer_reminder_sends) from the legacy sent_reminders/offer_sent_reminders
+         so a freshly deployed reminder run doesn't re-send already-sent items.
+      2. For each card_share_group: link its distinct users into one
+         account_link_group (merging any pre-existing link groups), and collapse
+         their duplicate user_cards instances of that card into a single
+         surviving instance — reassigning redemptions, reminders, user_benefits,
+         and reminder_sends to the survivor — so the shared card shows once.
+      3. Empty the retired card_share_* tables and null user_cards.share_group_id.
+
+    Idempotent via the 'card_shares_to_links_done' settings flag. Returns a short
+    status string. Run with:  python app.py migrate-links
+    """
+    if db.execute("SELECT 1 FROM settings WHERE key = 'card_shares_to_links_done'").fetchone():
+        return 'already done — no-op'
+
+    # 1. Backfill per-recipient dedup (recipient = current owner of card/offer).
+    db.execute('''
+        INSERT OR IGNORE INTO reminder_sends
+            (recipient_user_id, user_card_id, benefit_id, period_start, days_before, sent_at)
+        SELECT uc.user_id, sr.user_card_id, sr.benefit_id, sr.period_start, sr.days_before, sr.sent_at
+        FROM sent_reminders sr JOIN user_cards uc ON uc.id = sr.user_card_id
+    ''')
+    db.execute('''
+        INSERT OR IGNORE INTO offer_reminder_sends
+            (recipient_user_id, offer_id, days_before, sent_at)
+        SELECT o.user_id, osr.offer_id, osr.days_before, osr.sent_at
+        FROM offer_sent_reminders osr JOIN offers o ON o.id = osr.offer_id
+    ''')
+
+    groups = db.execute('SELECT id FROM card_share_groups').fetchall()
+    linked = 0
+    for grp in groups:
+        members = db.execute('''
+            SELECT csm.user_card_id, uc.user_id
+            FROM card_share_members csm JOIN user_cards uc ON uc.id = csm.user_card_id
+            WHERE csm.group_id = ?
+        ''', (grp['id'],)).fetchall()
+        if not members:
+            continue
+        user_ids = sorted({m['user_id'] for m in members})
+        uc_ids   = sorted({m['user_card_id'] for m in members})
+        if len(user_ids) < 2:
+            continue  # not actually shared between two people — leave it alone
+
+        # 2a. Link the users into one account_link_group, merging any existing.
+        uph = ','.join('?' * len(user_ids))
+        existing = sorted({r['link_group_id'] for r in db.execute(
+            f'SELECT link_group_id FROM users WHERE id IN ({uph}) AND link_group_id IS NOT NULL',
+            (*user_ids,)).fetchall()})
+        if existing:
+            link_gid = existing[0]
+            for other in existing[1:]:
+                db.execute('UPDATE users SET link_group_id = ? WHERE link_group_id = ?', (link_gid, other))
+                db.execute('DELETE FROM account_link_groups WHERE id = ?', (other,))
+        else:
+            link_gid = db.execute('INSERT INTO account_link_groups DEFAULT VALUES').lastrowid
+        db.execute(f'UPDATE users SET link_group_id = ? WHERE id IN ({uph})', (link_gid, *user_ids))
+
+        # 2b. Collapse duplicate instances of this card into the lowest-id survivor.
+        survivor = uc_ids[0]
+        for dup in uc_ids[1:]:
+            db.execute('UPDATE redemptions SET user_card_id = ? WHERE user_card_id = ?', (survivor, dup))
+            for tbl in ('reminders', 'user_benefits', 'reminder_sends'):
+                db.execute(f'UPDATE OR IGNORE {tbl} SET user_card_id = ? WHERE user_card_id = ?', (survivor, dup))
+                db.execute(f'DELETE FROM {tbl} WHERE user_card_id = ?', (dup,))
+            db.execute('DELETE FROM card_share_members WHERE user_card_id = ?', (dup,))
+            db.execute('DELETE FROM user_cards WHERE id = ?', (dup,))
+        db.execute('UPDATE user_cards SET share_group_id = NULL WHERE id = ?', (survivor,))
+        linked += 1
+
+    # 3. Retire the card-level sharing tables (kept in schema; just emptied).
+    db.execute('DELETE FROM card_share_members')
+    db.execute('DELETE FROM card_share_groups')
+    db.execute('UPDATE user_cards SET share_group_id = NULL WHERE share_group_id IS NOT NULL')
+
+    db.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('card_shares_to_links_done', '1')")
+    db.commit()
+    return f'converted {linked} share group(s) to account links'
 
 
 def _ensure_user_scoped_indexes(db):
@@ -717,6 +806,45 @@ def effective_user_card_ids(db, user_card_id):
     return members or [user_card_id]
 
 
+def linked_user_ids(db, user_id):
+    """Return the user ids that share one wallet with user_id, INCLUDING
+    user_id itself. Solo account → [user_id]. Linked → both members of the
+    account_link_group. Always non-empty and always includes self, so callers
+    can build an `IN (...)` clause unconditionally."""
+    row = db.execute('SELECT link_group_id FROM users WHERE id = ?', (user_id,)).fetchone()
+    if not row or row['link_group_id'] is None:
+        return [user_id]
+    ids = [r['id'] for r in db.execute(
+        'SELECT id FROM users WHERE link_group_id = ? ORDER BY id',
+        (row['link_group_id'],)).fetchall()]
+    return ids or [user_id]
+
+
+def _link_partner_id(db, user_id):
+    """The other member of a pairwise link, or None if the user isn't linked."""
+    others = [i for i in linked_user_ids(db, user_id) if i != user_id]
+    return others[0] if others else None
+
+
+def _dissolve_link(db, user_id):
+    """Before deleting `user_id`, dissolve any account link without data loss:
+    reassign the departing user's still-shared cards and offers to the partner
+    (so the survivor keeps the shared wallet), then clear the link group. No-op
+    for a solo account. Caller commits."""
+    row = db.execute('SELECT link_group_id FROM users WHERE id = ?', (user_id,)).fetchone()
+    if not row or row['link_group_id'] is None:
+        return
+    gid = row['link_group_id']
+    partner_id = _link_partner_id(db, user_id)
+    if partner_id is not None:
+        # Hand the shared wallet to the surviving partner so the cascade from
+        # DELETE FROM users doesn't take it with the departing account.
+        db.execute('UPDATE user_cards SET user_id = ? WHERE user_id = ?', (partner_id, user_id))
+        db.execute('UPDATE offers     SET user_id = ? WHERE user_id = ?', (partner_id, user_id))
+    db.execute('UPDATE users SET link_group_id = NULL WHERE link_group_id = ?', (gid,))
+    db.execute('DELETE FROM account_link_groups WHERE id = ?', (gid,))
+
+
 def today_in_tz(db):
     """Current date in the app's configured reminder timezone. The reminder
     scheduler fires in this zone, so all 'days left' / current-period math must
@@ -893,14 +1021,18 @@ def _offer_email_dict(o):
 
 
 def _gather_user_offers(db, uid, today, force=False):
-    """For a user's reminder run, return (offers_for_email, due_keys):
-      offers_for_email: every active, non-expired offer shaped for the email
-                        footer (awareness on every benefit email);
+    """For recipient `uid`'s reminder run, return (offers_for_email, due_keys):
+      offers_for_email: every active, non-expired offer in the recipient's shared
+                        wallet (their own + any linked partner's), shaped for the
+                        email footer (awareness on every benefit email);
       due_keys: list of (offer_id, days_before) whose lead-time threshold is
-                reached and not yet sent — these drive a standalone offers email
-                and get logged to offer_sent_reminders once the email goes out."""
+                reached and not yet sent TO THIS RECIPIENT — these drive a
+                standalone offers email and get logged to offer_reminder_sends
+                (keyed by recipient) once the email goes out."""
+    ids = linked_user_ids(db, uid)
+    ph  = ','.join('?' * len(ids))
     rows = db.execute(
-        'SELECT * FROM offers WHERE user_id = ? AND archived = 0', (uid,)).fetchall()
+        f'SELECT * FROM offers WHERE user_id IN ({ph}) AND archived = 0', (*ids,)).fetchall()
     offers_for_email = []
     due_keys = []
     for r in rows:
@@ -911,12 +1043,13 @@ def _gather_user_offers(db, uid, today, force=False):
         if o['days_left'] is None:
             continue
         # reminder_days is sorted DESC; fire the first (earliest) threshold that
-        # is reached and hasn't been sent, mirroring the benefit catch-up logic.
+        # is reached and hasn't been sent to this recipient, mirroring the benefit
+        # catch-up logic.
         for d in o['reminder_days']:
             if o['days_left'] <= d:
                 already = db.execute(
-                    'SELECT 1 FROM offer_sent_reminders WHERE offer_id = ? AND days_before = ?',
-                    (o['id'], d)).fetchone()
+                    'SELECT 1 FROM offer_reminder_sends WHERE recipient_user_id = ? AND offer_id = ? AND days_before = ?',
+                    (uid, o['id'], d)).fetchone()
                 if not already or force:
                     due_keys.append((o['id'], d))
                 break
@@ -1144,7 +1277,7 @@ def _hash_invite_token(raw_token):
 
 
 def _ttl_for_purpose(purpose):
-    if purpose in ('reset', 'share'):
+    if purpose in ('reset', 'share', 'link'):
         return timedelta(hours=RESET_TTL_HOURS)
     return timedelta(days=INVITE_TTL_DAYS)
 
@@ -1340,6 +1473,7 @@ def user_delete(id):
         db.close()
         flash('User not found.', 'danger')
         return redirect(url_for('users_list'))
+    _dissolve_link(db, id)
     db.execute('DELETE FROM users WHERE id = ?', (id,))
     db.commit()
     db.close()
@@ -1484,7 +1618,9 @@ def reset_password(token):
 def dashboard():
     db = get_db()
     uid = g.user['id']
-    user_cards = db.execute('''
+    ids = linked_user_ids(db, uid)
+    ph  = ','.join('?' * len(ids))
+    user_cards = db.execute(f'''
         SELECT uc.id           AS user_card_id,
                uc.nickname     AS nickname,
                uc.share_group_id,
@@ -1495,9 +1631,9 @@ def dashboard():
                c.published     AS card_published
         FROM user_cards uc
         JOIN cards c ON c.id = uc.card_id
-        WHERE uc.user_id = ? AND uc.active = 1 AND c.active = 1
+        WHERE uc.user_id IN ({ph}) AND uc.active = 1 AND c.active = 1
         ORDER BY c.name, uc.id
-    ''', (uid,)).fetchall()
+    ''', (*ids,)).fetchall()
 
     dashboard_cards = []
     total_benefits = 0
@@ -1583,14 +1719,16 @@ def add_card():
     cards as tiles with per-tile Add buttons. Distinct from /card-templates,
     which is admin's catalog-management surface."""
     db = get_db()
-    rows = db.execute('''
+    ids = linked_user_ids(db, g.user['id'])
+    ph  = ','.join('?' * len(ids))
+    rows = db.execute(f'''
         SELECT c.id, c.name, c.annual_fee, c.active,
                (SELECT COUNT(*) FROM benefits b WHERE b.card_id = c.id AND b.active = 1) AS benefit_count,
-               (SELECT COUNT(*) FROM user_cards uc WHERE uc.card_id = c.id AND uc.user_id = ? AND uc.active = 1) AS my_count
+               (SELECT COUNT(*) FROM user_cards uc WHERE uc.card_id = c.id AND uc.user_id IN ({ph}) AND uc.active = 1) AS my_count
         FROM cards c
         WHERE c.published = 1 AND c.active = 1
         ORDER BY c.name
-    ''', (g.user['id'],)).fetchall()
+    ''', (*ids,)).fetchall()
     db.close()
     return render_template('add_card.html', cards=rows)
 
@@ -1707,105 +1845,85 @@ def card_templates_add(card_id):
     return redirect(url_for('card_detail', id=new_uc_id))
 
 
-@app.route('/cards/<int:id>/share', methods=['POST'])
+@app.route('/link-account', methods=['POST'])
 @login_required
-def card_share(id):
-    """Invite an existing user to share THIS user_cards instance (id =
-    user_card_id) so they pool redemptions on the same physical card."""
+def link_account():
+    """Invite an existing user to LINK accounts. Once accepted, the two accounts
+    share one wallet — all cards, benefits, redemptions, and offers. Pairwise:
+    neither party may already be linked."""
     db        = get_db()
     uid       = g.user['id']
     inviter   = g.user
     raw_email = request.form.get('email', '').strip()
     if not raw_email:
         db.close()
-        flash('Enter the email of the user you want to share with.', 'danger')
-        return redirect(url_for('card_detail', id=id))
+        flash('Enter the email of the account you want to link with.', 'danger')
+        return redirect(url_for('settings'))
 
-    my_uc = db.execute(
-        'SELECT id, card_id, share_group_id FROM user_cards WHERE id = ? AND user_id = ?',
-        (id, uid)).fetchone()
-    if not my_uc:
+    if _link_partner_id(db, uid) is not None:
         db.close()
-        flash('You can only share a card that is in your own wallet.', 'danger')
-        return redirect(url_for('dashboard'))
+        flash('Your account is already linked. Unlinking isn\'t available yet.', 'danger')
+        return redirect(url_for('settings'))
 
     invitee = db.execute('SELECT id, email FROM users WHERE email = ?', (raw_email,)).fetchone()
     if not invitee:
         db.close()
         flash(f'No user found with email {raw_email}. Ask the administrator to invite them first.', 'danger')
-        return redirect(url_for('card_detail', id=id))
+        return redirect(url_for('settings'))
     if invitee['id'] == uid:
         db.close()
-        flash("You can't share a card with yourself.", 'danger')
-        return redirect(url_for('card_detail', id=id))
+        flash("You can't link an account with itself.", 'danger')
+        return redirect(url_for('settings'))
+    if _link_partner_id(db, invitee['id']) is not None:
+        db.close()
+        flash(f'{invitee["email"]} is already linked with another account.', 'danger')
+        return redirect(url_for('settings'))
 
-    # If THIS instance is already shared and invitee is a member, no-op
-    if my_uc['share_group_id'] is not None:
-        already = db.execute('''
-            SELECT 1 FROM card_share_members csm
-            JOIN user_cards uc ON uc.id = csm.user_card_id
-            WHERE csm.group_id = ? AND uc.user_id = ?
-        ''', (my_uc['share_group_id'], invitee['id'])).fetchone()
-        if already:
-            db.close()
-            flash(f'{invitee["email"]} already shares this card with you.', 'info')
-            return redirect(url_for('card_detail', id=id))
-
-    card = db.execute('SELECT id, name FROM cards WHERE id = ?', (my_uc['card_id'],)).fetchone()
-    raw_token = _create_token(db, invitee['id'], purpose='share',
-                              inviter_user_id=uid, card_id=my_uc['card_id'])
-    # Tag the specific instance being shared
-    db.execute('UPDATE invitations SET inviter_user_card_id = ? '
-               "WHERE token_hash = ?",
-               (id, _hash_invite_token(raw_token)))
+    raw_token = _create_token(db, invitee['id'], purpose='link', inviter_user_id=uid)
     db.commit()
 
     gmail_user = get_setting(db, 'gmail_user')
     gmail_pass = get_setting(db, 'gmail_app_password')
     if not all([gmail_user, gmail_pass]):
         db.close()
-        flash('Share invitation created but the email could not be sent — SMTP is not configured.', 'warning')
-        return redirect(url_for('card_detail', id=id))
-    accept_url = url_for('accept_share', token=raw_token, _external=True)
+        flash('Link invitation created but the email could not be sent — SMTP is not configured.', 'warning')
+        return redirect(url_for('settings'))
+    accept_url = url_for('accept_link', token=raw_token, _external=True)
     try:
-        send_share_invite_email(gmail_user, gmail_pass, invitee['email'],
-                                accept_url, inviter['email'], card['name'])
+        send_link_invite_email(gmail_user, gmail_pass, invitee['email'],
+                               accept_url, inviter['email'])
     except Exception as e:
         db.close()
-        flash(f'Failed to send share invitation to {invitee["email"]}: {e}', 'danger')
-        return redirect(url_for('card_detail', id=id))
+        flash(f'Failed to send link invitation to {invitee["email"]}: {e}', 'danger')
+        return redirect(url_for('settings'))
     db.close()
-    flash(f'Share invitation sent to {invitee["email"]}. Expires in {RESET_TTL_HOURS} hours.', 'success')
-    return redirect(url_for('card_detail', id=id))
+    flash(f'Link invitation sent to {invitee["email"]}. Expires in {RESET_TTL_HOURS} hours.', 'success')
+    return redirect(url_for('settings'))
 
 
-@app.route('/accept-share/<token>', methods=['GET', 'POST'])
+@app.route('/accept-link/<token>', methods=['GET', 'POST'])
 @login_required
-def accept_share(token):
+def accept_link(token):
     db  = get_db()
-    inv = _consume_valid_token(db, token, purpose='share')
+    inv = _consume_valid_token(db, token, purpose='link')
     if not inv:
         db.close()
-        return render_template('accept_share.html', invalid=True), 410
+        return render_template('accept_link.html', invalid=True), 410
     # The token's user_id is the invitee. Reject if the wrong user is logged in.
     if inv['user_id'] != g.user['id']:
         db.close()
-        return render_template('accept_share.html', invalid=True,
+        return render_template('accept_link.html', invalid=True,
                                 wrong_user_msg=True), 403
 
-    # Load context for display + action
     extra = db.execute('''
-        SELECT i.card_id, i.inviter_user_id, i.inviter_user_card_id,
-               c.name AS card_name,
-               u.email AS inviter_email
+        SELECT i.inviter_user_id, u.email AS inviter_email
         FROM invitations i
-        JOIN cards c ON c.id = i.card_id
         JOIN users u ON u.id = i.inviter_user_id
         WHERE i.id = ?
     ''', (inv['invite_id'],)).fetchone()
     if not extra:
         db.close()
-        return render_template('accept_share.html', invalid=True), 410
+        return render_template('accept_link.html', invalid=True), 410
 
     if request.method == 'POST':
         action = request.form.get('action')
@@ -1814,69 +1932,40 @@ def accept_share(token):
                        (_now_utc().isoformat(timespec='seconds'), inv['invite_id']))
             db.commit()
             db.close()
-            flash(f'Declined share invitation for {extra["card_name"]}.', 'info')
+            flash(f'Declined the link invitation from {extra["inviter_email"]}.', 'info')
             return redirect(url_for('dashboard'))
         if action != 'accept':
             db.close()
             flash('Unknown action.', 'danger')
-            return redirect(url_for('accept_share', token=token))
+            return redirect(url_for('accept_link', token=token))
 
-        card_id     = extra['card_id']
-        inviter_id  = extra['inviter_user_id']
-        invitee_id  = inv['user_id']
-        inviter_uc_id = extra['inviter_user_card_id']
+        inviter_id = extra['inviter_user_id']
+        invitee_id = inv['user_id']
 
-        # Resolve the specific inviter user_cards row being shared
-        if inviter_uc_id:
-            inviter_uc = db.execute(
-                'SELECT id, share_group_id FROM user_cards WHERE id = ? AND user_id = ?',
-                (inviter_uc_id, inviter_id)).fetchone()
-        else:
-            # Legacy invite without an instance pointer — fall back to any row
-            inviter_uc = db.execute(
-                'SELECT id, share_group_id FROM user_cards WHERE user_id = ? AND card_id = ? '
-                'ORDER BY id LIMIT 1',
-                (inviter_id, card_id)).fetchone()
-        if not inviter_uc:
+        # Re-validate pairwise at accept time (state may have changed since invite).
+        if _link_partner_id(db, inviter_id) is not None:
             db.close()
-            flash("The inviter no longer has this card. Ask them to share again.", 'danger')
+            flash(f'{extra["inviter_email"]} has since linked with another account.', 'danger')
+            return redirect(url_for('dashboard'))
+        if _link_partner_id(db, invitee_id) is not None:
+            db.close()
+            flash('Your account is already linked.', 'danger')
             return redirect(url_for('dashboard'))
 
-        # Resolve / create the share group
-        if inviter_uc['share_group_id'] is not None:
-            group_id = inviter_uc['share_group_id']
-        else:
-            cur = db.execute('INSERT INTO card_share_groups (card_id) VALUES (?)', (card_id,))
-            group_id = cur.lastrowid
-            db.execute(
-                'INSERT OR IGNORE INTO card_share_members (group_id, user_card_id) VALUES (?, ?)',
-                (group_id, inviter_uc['id']))
-            db.execute(
-                'UPDATE user_cards SET share_group_id = ? WHERE id = ?',
-                (group_id, inviter_uc['id']))
-
-        # The invitee always gets a FRESH user_cards instance dedicated to this
-        # share — multi-instance world, so we don't risk fighting over an
-        # existing solo instance the invitee already has.
-        cur = db.execute(
-            'INSERT INTO user_cards (user_id, card_id, active, share_group_id) VALUES (?, ?, 1, ?)',
-            (invitee_id, card_id, group_id))
-        invitee_uc_id = cur.lastrowid
-
-        db.execute(
-            'INSERT OR IGNORE INTO card_share_members (group_id, user_card_id) VALUES (?, ?)',
-            (group_id, invitee_uc_id))
+        cur = db.execute('INSERT INTO account_link_groups DEFAULT VALUES')
+        group_id = cur.lastrowid
+        db.execute('UPDATE users SET link_group_id = ? WHERE id IN (?, ?)',
+                   (group_id, inviter_id, invitee_id))
         db.execute('UPDATE invitations SET used_at = ? WHERE id = ?',
                    (_now_utc().isoformat(timespec='seconds'), inv['invite_id']))
         db.commit()
         db.close()
-        flash(f'You now share {extra["card_name"]} with {extra["inviter_email"]}.', 'success')
+        flash(f'Your account is now linked with {extra["inviter_email"]} — you share everything.', 'success')
         return redirect(url_for('dashboard'))
 
     db.close()
-    return render_template('accept_share.html',
+    return render_template('accept_link.html',
                             invalid=False,
-                            card_name=extra['card_name'],
                             inviter_email=extra['inviter_email'],
                             token=token)
 
@@ -1887,9 +1976,11 @@ def user_card_rename(id):
     """Set or clear the nickname on a user_cards instance the current user owns."""
     nickname = request.form.get('nickname', '').strip() or None
     db = get_db()
+    ids = linked_user_ids(db, g.user['id'])
+    ph  = ','.join('?' * len(ids))
     row = db.execute(
-        'SELECT id FROM user_cards WHERE id = ? AND user_id = ?',
-        (id, g.user['id'])).fetchone()
+        f'SELECT id FROM user_cards WHERE id = ? AND user_id IN ({ph})',
+        (id, *ids)).fetchone()
     if not row:
         db.close()
         flash('Card not found.', 'danger')
@@ -1908,12 +1999,14 @@ def card_remove(id):
     id is a user_cards row id. Redemption history is preserved; re-adding
     is via Card Templates (which creates a fresh instance)."""
     db  = get_db()
-    row = db.execute('''
+    ids = linked_user_ids(db, g.user['id'])
+    ph  = ','.join('?' * len(ids))
+    row = db.execute(f'''
         SELECT uc.id, COALESCE(uc.nickname, c.name) AS label
         FROM user_cards uc
         JOIN cards c ON c.id = uc.card_id
-        WHERE uc.id = ? AND uc.user_id = ?
-    ''', (id, g.user['id'])).fetchone()
+        WHERE uc.id = ? AND uc.user_id IN ({ph})
+    ''', (id, *ids)).fetchone()
     if not row:
         db.close()
         flash('Card not found in your wallet.', 'danger')
@@ -1972,7 +2065,9 @@ def card_detail(id):
     catalog card, and per-instance benefit usage."""
     db  = get_db()
     uid = g.user['id']
-    row = db.execute('''
+    ids = linked_user_ids(db, uid)
+    ph  = ','.join('?' * len(ids))
+    row = db.execute(f'''
         SELECT uc.id            AS user_card_id,
                uc.card_id       AS card_id,
                uc.nickname      AS nickname,
@@ -1984,8 +2079,8 @@ def card_detail(id):
                c.published      AS published
         FROM user_cards uc
         JOIN cards c ON c.id = uc.card_id
-        WHERE uc.id = ? AND uc.user_id = ?
-    ''', (id, uid)).fetchone()
+        WHERE uc.id = ? AND uc.user_id IN ({ph})
+    ''', (id, *ids)).fetchone()
     if not row:
         db.close()
         flash('Card not found.', 'danger')
@@ -2004,17 +2099,6 @@ def card_detail(id):
         eb['user_active'] = b['user_active']
         benefits.append(eb)
 
-    # Other share members (besides the viewer) for display
-    share_members = []
-    if row['share_group_id'] is not None:
-        share_members = [dict(r) for r in db.execute('''
-            SELECT u.email, uc.nickname
-            FROM card_share_members csm
-            JOIN user_cards uc ON uc.id = csm.user_card_id
-            JOIN users u ON u.id = uc.user_id
-            WHERE csm.group_id = ? AND uc.id != ?
-        ''', (row['share_group_id'], id)).fetchall()]
-
     card = {
         'id':             row['card_id'],
         'user_card_id':   row['user_card_id'],
@@ -2024,11 +2108,9 @@ def card_detail(id):
         'published':      row['published'],
         'nickname':       row['nickname'],
         'display_name':   row['nickname'] or row['card_name'],
-        'share_group_id': row['share_group_id'],
     }
     db.close()
-    return render_template('cards/detail.html', card=card, benefits=benefits,
-                            share_members=share_members)
+    return render_template('cards/detail.html', card=card, benefits=benefits)
 
 
 # ── Admin catalog routes (operate on cards.id, not user_cards.id) ─────────
@@ -2137,10 +2219,13 @@ def benefit_new(card_id):
             db.execute(
                 'INSERT OR IGNORE INTO benefit_default_reminders (benefit_id, days_before) '
                 'VALUES (?, ?)', (bid, d))
-        # Also apply them to any instances the admin already holds of this card.
+        # Also apply them to any instances the admin (or their linked partner)
+        # already holds of this card.
+        _ids = linked_user_ids(db, g.user['id'])
+        _ph  = ','.join('?' * len(_ids))
         my_ucs = [r['id'] for r in db.execute(
-            'SELECT id FROM user_cards WHERE user_id = ? AND card_id = ?',
-            (g.user['id'], card_id)).fetchall()]
+            f'SELECT id FROM user_cards WHERE user_id IN ({_ph}) AND card_id = ?',
+            (*_ids, card_id)).fetchall()]
         for my_uc_id in my_ucs:
             for d in default_days:
                 db.execute(
@@ -2242,9 +2327,11 @@ def instance_benefit_edit(uc_id, bid):
     to the benefit page, which carries the same controls."""
     db  = get_db()
     uid = g.user['id']
+    ids = linked_user_ids(db, uid)
+    ph  = ','.join('?' * len(ids))
     uc_row = db.execute(
-        'SELECT id, card_id, nickname FROM user_cards WHERE id = ? AND user_id = ?',
-        (uc_id, uid)).fetchone()
+        f'SELECT id, card_id, nickname FROM user_cards WHERE id = ? AND user_id IN ({ph})',
+        (uc_id, *ids)).fetchone()
     if not uc_row:
         db.close()
         flash('Card instance not found.', 'danger')
@@ -2315,12 +2402,14 @@ def benefit_pursue_toggle(id):
         flash('Missing card instance for this action.', 'danger')
         return redirect(request.referrer or url_for('dashboard'))
 
-    row = db.execute('''
+    ids = linked_user_ids(db, uid)
+    ph  = ','.join('?' * len(ids))
+    row = db.execute(f'''
         SELECT b.name AS bname, uc.id AS uc_id
         FROM benefits b
         JOIN user_cards uc ON uc.card_id = b.card_id
-        WHERE b.id = ? AND uc.id = ? AND uc.user_id = ?
-    ''', (id, target_uc, uid)).fetchone()
+        WHERE b.id = ? AND uc.id = ? AND uc.user_id IN ({ph})
+    ''', (id, target_uc, *ids)).fetchone()
     if not row:
         db.close()
         flash('Benefit not found.', 'danger')
@@ -2353,22 +2442,25 @@ def benefit_pursue_toggle(id):
 
 def _resolve_target_uc_for_benefit(db, benefit_id, viewer_id, requested_uc=None):
     """Find which user_cards instance to scope a benefit action to.
-    If requested_uc is given, validate it. Otherwise fall back to the viewer's
-    first user_cards row for the benefit's card (good enough for solo users)."""
+    If requested_uc is given, validate it. Otherwise fall back to the first
+    user_cards row for the benefit's card owned by the viewer or their linked
+    partner (the wallet is shared, so either's instance is fair game)."""
+    ids = linked_user_ids(db, viewer_id)
+    ph  = ','.join('?' * len(ids))
     if requested_uc:
-        row = db.execute('''
+        row = db.execute(f'''
             SELECT uc.id FROM user_cards uc
             JOIN benefits b ON b.card_id = uc.card_id
-            WHERE uc.id = ? AND uc.user_id = ? AND b.id = ?
-        ''', (requested_uc, viewer_id, benefit_id)).fetchone()
+            WHERE uc.id = ? AND uc.user_id IN ({ph}) AND b.id = ?
+        ''', (requested_uc, *ids, benefit_id)).fetchone()
         if row:
             return row['id']
-    fb = db.execute('''
+    fb = db.execute(f'''
         SELECT uc.id FROM user_cards uc
         JOIN benefits b ON b.card_id = uc.card_id
-        WHERE uc.user_id = ? AND b.id = ?
+        WHERE uc.user_id IN ({ph}) AND b.id = ?
         ORDER BY uc.id LIMIT 1
-    ''', (viewer_id, benefit_id)).fetchone()
+    ''', (*ids, benefit_id)).fetchone()
     return fb['id'] if fb else None
 
 
@@ -2579,23 +2671,15 @@ def benefit_redeem(id):
 
 
 def _viewer_authorized_for_redemption(db, redemption_row, viewer_id):
-    """A user can edit/delete a redemption iff its user_card_id (or a peer in
-    its share group) belongs to them."""
+    """A user can edit/delete a redemption iff the card it belongs to is owned
+    by the viewer or their linked partner (linked accounts share the wallet)."""
     uc_owner = db.execute(
-        'SELECT user_id, share_group_id FROM user_cards WHERE id = ?',
+        'SELECT user_id FROM user_cards WHERE id = ?',
         (redemption_row['user_card_id'],)
     ).fetchone()
     if not uc_owner:
         return False
-    if uc_owner['user_id'] == viewer_id:
-        return True
-    if uc_owner['share_group_id'] is None:
-        return False
-    return bool(db.execute('''
-        SELECT 1 FROM card_share_members csm
-        JOIN user_cards uc ON uc.id = csm.user_card_id
-        WHERE csm.group_id = ? AND uc.user_id = ?
-    ''', (uc_owner['share_group_id'], viewer_id)).fetchone())
+    return uc_owner['user_id'] in linked_user_ids(db, viewer_id)
 
 
 @app.route('/redemptions/<int:id>/edit', methods=['POST'])
@@ -2814,6 +2898,7 @@ def account_close():
             flash('You are the only admin — promote another user to admin before closing your account.', 'danger')
             return redirect(url_for('settings'))
 
+    _dissolve_link(db, g.user['id'])
     db.execute('DELETE FROM users WHERE id = ?', (g.user['id'],))
     db.commit()
     db.close()
@@ -2900,8 +2985,14 @@ def settings():
             'reminder_tz':   get_setting(db, 'reminder_tz', DEFAULT_TZ),
             'signup_open':   get_setting(db, 'signup_open', '0') == '1',
         }
+    partner_id = _link_partner_id(db, g.user['id'])
+    linked_partner_email = None
+    if partner_id is not None:
+        prow = db.execute('SELECT email FROM users WHERE id = ?', (partner_id,)).fetchone()
+        linked_partner_email = prow['email'] if prow else None
     db.close()
-    return render_template('settings.html', cfg=cfg)
+    return render_template('settings.html', cfg=cfg,
+                           linked_partner_email=linked_partner_email)
 
 
 @app.route('/email/test-reminder', methods=['POST'])
@@ -2925,15 +3016,17 @@ def send_test_reminder():
         recipient = test_recipient
 
     base_url = (get_setting(db, 'app_base_url', APP_BASE_URL) or APP_BASE_URL).rstrip('/')
-    rows = db.execute('''
+    ids = linked_user_ids(db, uid)
+    ph  = ','.join('?' * len(ids))
+    rows = db.execute(f'''
         SELECT b.*, c.name AS card_name, uc.id AS user_card_id, uc.nickname AS nickname
         FROM benefits b
         JOIN cards c       ON c.id      = b.card_id
         JOIN user_cards uc ON uc.card_id = c.id
         LEFT JOIN user_benefits ub ON ub.benefit_id = b.id AND ub.user_card_id = uc.id
-        WHERE uc.user_id = ? AND uc.active = 1 AND b.active = 1 AND c.active = 1
+        WHERE uc.user_id IN ({ph}) AND uc.active = 1 AND b.active = 1 AND c.active = 1
               AND COALESCE(ub.active, 1) = 1
-    ''', (uid,)).fetchall()
+    ''', (*ids,)).fetchall()
 
     due = []
     for row in rows:
@@ -3022,11 +3115,13 @@ def offers_list():
     db  = get_db()
     uid = g.user['id']
     today = today_in_tz(db)
+    ids = linked_user_ids(db, uid)
+    ph  = ','.join('?' * len(ids))
     rows = db.execute(
-        'SELECT * FROM offers WHERE user_id = ? AND archived = 0 ORDER BY '
+        f'SELECT * FROM offers WHERE user_id IN ({ph}) AND archived = 0 ORDER BY '
         # Soonest expiration first; undated offers sink to the bottom.
         'CASE WHEN expiration_date IS NULL THEN 1 ELSE 0 END, expiration_date, created_at DESC',
-        (uid,)).fetchall()
+        (*ids,)).fetchall()
     offers = [enrich_offer(db, r, today) for r in rows]
     db.close()
     return render_template('offers/list.html', offers=offers)
@@ -3065,7 +3160,9 @@ def offer_new():
 def offer_edit(id):
     db  = get_db()
     uid = g.user['id']
-    offer = db.execute('SELECT * FROM offers WHERE id = ? AND user_id = ?', (id, uid)).fetchone()
+    ids = linked_user_ids(db, uid)
+    ph  = ','.join('?' * len(ids))
+    offer = db.execute(f'SELECT * FROM offers WHERE id = ? AND user_id IN ({ph})', (id, *ids)).fetchone()
     if not offer:
         db.close()
         flash('Offer not found.', 'danger')
@@ -3117,7 +3214,9 @@ def offer_redeem(id):
     and archives it. Per the spec we keep no per-redemption history."""
     db  = get_db()
     uid = g.user['id']
-    offer = db.execute('SELECT * FROM offers WHERE id = ? AND user_id = ?', (id, uid)).fetchone()
+    ids = linked_user_ids(db, uid)
+    ph  = ','.join('?' * len(ids))
+    offer = db.execute(f'SELECT * FROM offers WHERE id = ? AND user_id IN ({ph})', (id, *ids)).fetchone()
     if not offer:
         db.close()
         flash('Offer not found.', 'danger')
@@ -3160,9 +3259,11 @@ def offer_redeem(id):
 def offer_delete(id):
     db  = get_db()
     uid = g.user['id']
-    row = db.execute('SELECT name FROM offers WHERE id = ? AND user_id = ?', (id, uid)).fetchone()
+    ids = linked_user_ids(db, uid)
+    ph  = ','.join('?' * len(ids))
+    row = db.execute(f'SELECT name FROM offers WHERE id = ? AND user_id IN ({ph})', (id, *ids)).fetchone()
     if row:
-        db.execute('DELETE FROM offers WHERE id = ? AND user_id = ?', (id, uid))
+        db.execute(f'DELETE FROM offers WHERE id = ? AND user_id IN ({ph})', (id, *ids))
         db.commit()
         flash(f'Offer "{row["name"]}" deleted.', 'success')
     db.close()
@@ -3202,16 +3303,20 @@ def _run_reminder_check(force=False):
         if not recipient:
             continue
 
-        raw = db.execute('''
+        # Shared wallet: a linked partner's cards are in this recipient's wallet
+        # too, so both partners are reminded about every shared card.
+        link_ids = linked_user_ids(db, uid)
+        link_ph  = ','.join('?' * len(link_ids))
+        raw = db.execute(f'''
             SELECT b.*, c.name AS card_name, uc.id AS user_card_id, uc.nickname AS nickname
             FROM benefits b
             JOIN cards c       ON c.id      = b.card_id
             JOIN user_cards uc ON uc.card_id = c.id
             LEFT JOIN user_benefits ub ON ub.benefit_id = b.id AND ub.user_card_id = uc.id
-            WHERE uc.user_id = ? AND uc.active = 1
+            WHERE uc.user_id IN ({link_ph}) AND uc.active = 1
                   AND b.active = 1 AND c.active = 1
                   AND COALESCE(ub.active, 1) = 1
-        ''', (uid,)).fetchall()
+        ''', (*link_ids,)).fetchall()
 
         benefits_due = []
         for row in raw:
@@ -3223,13 +3328,14 @@ def _run_reminder_check(force=False):
             dl = b['days_left']
             for days_before in b['reminder_days']:
                 # Catch-up: fire when at or past the threshold and this
-                # (period, days_before) slot hasn't been sent — so a missed day
-                # still goes out instead of being skipped forever. The per-slot
+                # (period, days_before) slot hasn't been sent TO THIS RECIPIENT —
+                # so a missed day still goes out instead of being skipped forever,
+                # and both linked partners each get their own copy. The per-slot
                 # dedup below keeps the normal one-email-per-threshold cadence.
                 if dl <= days_before:
                     already_sent = db.execute(
-                        'SELECT 1 FROM sent_reminders WHERE user_card_id=? AND benefit_id=? AND period_start=? AND days_before=?',
-                        (uc_id, b['id'], period_start_str, days_before)
+                        'SELECT 1 FROM reminder_sends WHERE recipient_user_id=? AND user_card_id=? AND benefit_id=? AND period_start=? AND days_before=?',
+                        (uid, uc_id, b['id'], period_start_str, days_before)
                     ).fetchone()
                     if not already_sent or force:
                         display_card = row['nickname'] or row['card_name']
@@ -3244,9 +3350,9 @@ def _run_reminder_check(force=False):
                         })
                         if not already_sent:
                             db.execute(
-                                'INSERT OR IGNORE INTO sent_reminders (user_card_id, benefit_id, period_start, days_before) '
-                                'VALUES (?, ?, ?, ?)',
-                                (uc_id, b['id'], period_start_str, days_before))
+                                'INSERT OR IGNORE INTO reminder_sends (recipient_user_id, user_card_id, benefit_id, period_start, days_before) '
+                                'VALUES (?, ?, ?, ?, ?)',
+                                (uid, uc_id, b['id'], period_start_str, days_before))
                         break  # only include a benefit once per email
 
         # Offers ride along every benefit email as an awareness footer; if none
@@ -3259,8 +3365,8 @@ def _run_reminder_check(force=False):
                 send_reminder_email(gmail_user, gmail_pass, recipient, benefits_due, offers=offers_email)
                 for oid, d in due_offer_keys:
                     db.execute(
-                        'INSERT OR IGNORE INTO offer_sent_reminders (offer_id, days_before) VALUES (?, ?)',
-                        (oid, d))
+                        'INSERT OR IGNORE INTO offer_reminder_sends (recipient_user_id, offer_id, days_before) VALUES (?, ?, ?)',
+                        (uid, oid, d))
                 db.commit()
                 total_sent += len(benefits_due)
             except Exception as e:
@@ -3345,6 +3451,16 @@ if os.environ.get('WERKZEUG_RUN_MAIN') != 'false_sentinel':  # always true, just
 # ── Entry point ────────────────────────────────────────────────────────────────
 
 if __name__ == '__main__':
+    import sys
+    # Manual one-time migration entrypoint (run over SSH after deploy):
+    #   python app.py migrate-links
+    if len(sys.argv) > 1 and sys.argv[1] == 'migrate-links':
+        _db = get_db()
+        try:
+            print(_migrate_card_shares_to_account_links(_db))
+        finally:
+            _db.close()
+        sys.exit(0)
     # The local dev server is plain http, so a Secure-only session cookie would
     # never round-trip. Production runs via gunicorn (app:app) and never reaches
     # this block, so it keeps Secure cookies.

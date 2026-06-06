@@ -5,13 +5,13 @@ from email.mime.text import MIMEText
 from markupsafe import escape
 
 
-def send_share_invite_email(gmail_user, gmail_app_password, recipient, accept_url, inviter_email, card_name):
-    subject = f"{inviter_email} wants to share a card with you"
+def send_link_invite_email(gmail_user, gmail_app_password, recipient, accept_url, inviter_email):
+    subject = f"{inviter_email} wants to link accounts with you"
     html = f"""
     <html><body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#333;max-width:560px;">
-      <h2 style="color:#1a3c8a;">Card share invitation</h2>
-      <p><strong>{escape(inviter_email)}</strong> wants to share <strong>{escape(card_name)}</strong> with you on Card Benefits.</p>
-      <p>If you accept, you'll both pool redemptions on this card — each of you will see everything the other has logged, and either of you can add, edit, or delete redemptions. Your reminder preferences stay personal.</p>
+      <h2 style="color:#1a3c8a;">Account link invitation</h2>
+      <p><strong>{escape(inviter_email)}</strong> wants to link accounts with you on Card Benefits.</p>
+      <p>If you accept, the two of you share <strong>everything</strong> — all cards, benefits, redemptions, and offers become one shared wallet, and either of you can add, edit, or redeem any of it. You each keep your own login, your own reminder email address, and your own on/off switch for reminder emails.</p>
       <p style="margin:24px 0;">
         <a href="{accept_url}" style="background:#1a3c8a;color:#fff;text-decoration:none;
             padding:12px 22px;border-radius:6px;font-weight:600;display:inline-block;">

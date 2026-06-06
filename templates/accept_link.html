@@ -1,34 +1,34 @@
 {% extends 'base.html' %}
-{% block title %}Share invitation — Card Benefits{% endblock %}
+{% block title %}Account link invitation — Card Benefits{% endblock %}
 {% block content %}
 
 <div class="row justify-content-center mt-5">
   <div class="col-sm-10 col-md-7 col-lg-5">
     <div class="card p-4">
       {% if invalid %}
-        <h4 class="mb-3"><i class="bi bi-exclamation-triangle text-danger me-2"></i>Share invitation invalid</h4>
+        <h4 class="mb-3"><i class="bi bi-exclamation-triangle text-danger me-2"></i>Link invitation invalid</h4>
         {% if wrong_user_msg %}
           <p class="text-muted">
-            This share invitation was sent to a different account.
-            Sign out and sign back in as the invited user, or ask the sender to share with your account.
+            This link invitation was sent to a different account.
+            Sign out and sign back in as the invited user, or ask the sender to invite your account.
           </p>
         {% else %}
           <p class="text-muted">
-            This share invitation is no longer valid — it may have been used already,
-            expired, or replaced by a newer one. Ask the sender to share again.
+            This link invitation is no longer valid — it may have been used already,
+            expired, or replaced by a newer one. Ask the sender to invite again.
           </p>
         {% endif %}
         <a href="{{ url_for('dashboard') }}" class="btn btn-outline-secondary mt-2">Back to my wallet</a>
       {% else %}
-        <h4 class="mb-3"><i class="bi bi-people me-2"></i>Share invitation</h4>
+        <h4 class="mb-3"><i class="bi bi-link-45deg me-2"></i>Account link invitation</h4>
         <p>
-          <strong>{{ inviter_email }}</strong> wants to share
-          <strong>{{ card_name }}</strong> with you.
+          <strong>{{ inviter_email }}</strong> wants to link accounts with you.
         </p>
         <p class="text-muted small">
-          If you accept, redemptions on this card become pooled — you'll both see
-          everything either of you has logged, and either of you can add, edit, or
-          delete redemptions. Your reminder preferences stay personal.
+          If you accept, the two of you share <strong>everything</strong> — all cards,
+          benefits, redemptions, and offers become one shared wallet, and either of you
+          can add, edit, or redeem any of it. You each keep your own login, your own
+          reminder email address, and your own on/off switch for reminder emails.
         </p>
         <form method="post" class="d-flex gap-2 mt-3">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
