@@ -546,7 +546,18 @@
         padding-bottom: calc(var(--tabbar-h) + var(--safe-bottom) + 8px) !important;
         padding-left:  var(--safe-left);
         padding-right: var(--safe-right);
+        /* Fill the screen even with little content, so the fixed tab bar sits at
+           the bottom rather than floating up under a short page. border-box keeps
+           the padding-bottom inside the 100dvh so there's no phantom scroll. */
+        box-sizing: border-box;
+        display: flex;
+        flex-direction: column;
+        min-height: 100vh;
+        min-height: 100dvh;
       }
+      /* The main content region grows to fill the space between the sticky top
+         navbar and the bottom tab bar. */
+      .app-content { flex: 1 0 auto; }
 
       /* Compact top header — keep brand + theme toggle, hide nav links */
       .navbar {
@@ -883,7 +894,7 @@
 </nav>
 {% endif %}
 
-<div class="container-lg">
+<div class="container-lg app-content">
   {% block content %}{% endblock %}
 </div>
 
