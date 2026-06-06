@@ -3270,6 +3270,186 @@ def offer_delete(id):
     return redirect(url_for('offers_list'))
 
 
+# ── Subscriptions ───────────────────────────────────────────────────────────────
+
+def _wallet_cards_for(db, uid):
+    """Active cards in the shared wallet, as [{id, label}] for the payment-card
+    picker. Label is the per-instance nickname or the catalog card name."""
+    ids = linked_user_ids(db, uid)
+    ph  = ','.join('?' * len(ids))
+    rows = db.execute(f'''
+        SELECT uc.id AS id, COALESCE(uc.nickname, c.name) AS label
+        FROM user_cards uc JOIN cards c ON c.id = uc.card_id
+        WHERE uc.user_id IN ({ph}) AND uc.active = 1 AND c.active = 1
+        ORDER BY label
+    ''', (*ids,)).fetchall()
+    return [dict(r) for r in rows]
+
+
+def _read_subscription_form(form, db, uid):
+    """Parse + validate a subscription form. Returns (values, error)."""
+    name        = form.get('name', '').strip()
+    description = form.get('description', '').strip() or None
+    amount_raw  = form.get('amount', '').strip()
+    card_raw    = form.get('user_card_id', '').strip()
+    active      = 0 if form.get('inactive') else 1
+
+    if not name:
+        return None, 'Name is required.'
+    if not amount_raw:
+        return None, 'Monthly amount is required.'
+    try:
+        amount = float(amount_raw)
+    except ValueError:
+        return None, 'Amount must be a number.'
+    if amount < 0:
+        return None, 'Amount can\'t be negative.'
+
+    user_card_id = None
+    if card_raw:
+        try:
+            cand = int(card_raw)
+        except ValueError:
+            cand = None
+        # Only accept a card that's actually in the shared wallet.
+        if cand and any(c['id'] == cand for c in _wallet_cards_for(db, uid)):
+            user_card_id = cand
+
+    return {
+        'name': name, 'description': description, 'amount': amount,
+        'user_card_id': user_card_id, 'active': active,
+    }, None
+
+
+@app.route('/subscriptions')
+@login_required
+def subscriptions_list():
+    db  = get_db()
+    uid = g.user['id']
+    ids = linked_user_ids(db, uid)
+    ph  = ','.join('?' * len(ids))
+    rows = db.execute(f'''
+        SELECT s.*, COALESCE(uc.nickname, c.name) AS card_label
+        FROM subscriptions s
+        LEFT JOIN user_cards uc ON uc.id = s.user_card_id
+        LEFT JOIN cards c       ON c.id = uc.card_id
+        WHERE s.user_id IN ({ph})
+        ORDER BY s.active DESC, s.amount DESC, s.name
+    ''', (*ids,)).fetchall()
+    active   = [r for r in rows if r['active']]
+    inactive = [r for r in rows if not r['active']]
+    monthly_total = sum(r['amount'] for r in active)
+    db.close()
+    return render_template('subscriptions/list.html',
+                           active=active, inactive=inactive,
+                           active_count=len(active), inactive_count=len(inactive),
+                           monthly_total=monthly_total)
+
+
+@app.route('/subscriptions/new', methods=['GET', 'POST'])
+@login_required
+def subscription_new():
+    db  = get_db()
+    uid = g.user['id']
+    if request.method == 'POST':
+        values, err = _read_subscription_form(request.form, db, uid)
+        if err:
+            cards = _wallet_cards_for(db, uid)
+            db.close()
+            flash(err, 'danger')
+            return render_template('subscriptions/form.html', subscription=None,
+                                   form=request.form, wallet_cards=cards)
+        db.execute(
+            'INSERT INTO subscriptions (user_id, name, description, amount, user_card_id, active) '
+            'VALUES (?, ?, ?, ?, ?, ?)',
+            (uid, values['name'], values['description'], values['amount'],
+             values['user_card_id'], values['active']))
+        db.commit()
+        db.close()
+        flash(f'Subscription "{values["name"]}" added.', 'success')
+        return redirect(url_for('subscriptions_list'))
+
+    cards = _wallet_cards_for(db, uid)
+    db.close()
+    return render_template('subscriptions/form.html', subscription=None, form={}, wallet_cards=cards)
+
+
+@app.route('/subscriptions/<int:id>/edit', methods=['GET', 'POST'])
+@login_required
+def subscription_edit(id):
+    db  = get_db()
+    uid = g.user['id']
+    ids = linked_user_ids(db, uid)
+    ph  = ','.join('?' * len(ids))
+    sub = db.execute(f'SELECT * FROM subscriptions WHERE id = ? AND user_id IN ({ph})',
+                     (id, *ids)).fetchone()
+    if not sub:
+        db.close()
+        flash('Subscription not found.', 'danger')
+        return redirect(url_for('subscriptions_list'))
+
+    if request.method == 'POST':
+        values, err = _read_subscription_form(request.form, db, uid)
+        if err:
+            cards = _wallet_cards_for(db, uid)
+            db.close()
+            flash(err, 'danger')
+            return render_template('subscriptions/form.html', subscription=sub,
+                                   form=request.form, wallet_cards=cards)
+        db.execute(
+            'UPDATE subscriptions SET name=?, description=?, amount=?, user_card_id=?, active=? WHERE id=?',
+            (values['name'], values['description'], values['amount'],
+             values['user_card_id'], values['active'], id))
+        db.commit()
+        db.close()
+        flash(f'Subscription "{values["name"]}" updated.', 'success')
+        return redirect(url_for('subscriptions_list'))
+
+    cards = _wallet_cards_for(db, uid)
+    db.close()
+    return render_template('subscriptions/form.html', subscription=sub,
+                           form=dict(sub), wallet_cards=cards)
+
+
+@app.route('/subscriptions/<int:id>/toggle', methods=['POST'])
+@login_required
+def subscription_toggle(id):
+    """Flip a subscription between active and inactive (cancelled/paused)."""
+    db  = get_db()
+    uid = g.user['id']
+    ids = linked_user_ids(db, uid)
+    ph  = ','.join('?' * len(ids))
+    sub = db.execute(f'SELECT name, active FROM subscriptions WHERE id = ? AND user_id IN ({ph})',
+                     (id, *ids)).fetchone()
+    if not sub:
+        db.close()
+        flash('Subscription not found.', 'danger')
+        return redirect(url_for('subscriptions_list'))
+    new_active = 0 if sub['active'] else 1
+    db.execute('UPDATE subscriptions SET active = ? WHERE id = ?', (new_active, id))
+    db.commit()
+    db.close()
+    flash(f'"{sub["name"]}" marked {"active" if new_active else "inactive"}.', 'success')
+    return redirect(url_for('subscriptions_list'))
+
+
+@app.route('/subscriptions/<int:id>/delete', methods=['POST'])
+@login_required
+def subscription_delete(id):
+    db  = get_db()
+    uid = g.user['id']
+    ids = linked_user_ids(db, uid)
+    ph  = ','.join('?' * len(ids))
+    row = db.execute(f'SELECT name FROM subscriptions WHERE id = ? AND user_id IN ({ph})',
+                     (id, *ids)).fetchone()
+    if row:
+        db.execute(f'DELETE FROM subscriptions WHERE id = ? AND user_id IN ({ph})', (id, *ids))
+        db.commit()
+        flash(f'Subscription "{row["name"]}" deleted.', 'success')
+    db.close()
+    return redirect(url_for('subscriptions_list'))
+
+
 # ── Reminder logic ─────────────────────────────────────────────────────────────
 
 def _run_reminder_check(force=False):

@@ -238,6 +238,23 @@ CREATE TABLE IF NOT EXISTS offer_reminder_sends (
 
 CREATE INDEX IF NOT EXISTS idx_reminder_sends ON reminder_sends(recipient_user_id, user_card_id, benefit_id, period_start);
 CREATE INDEX IF NOT EXISTS idx_offer_reminder_sends ON offer_reminder_sends(recipient_user_id, offer_id);
+-- Subscriptions: recurring services a user pays for. Monthly-billed, so amount
+-- is the monthly cost and the headline "per month" total is just the sum of
+-- active subs. Personal-owned but shared across a linked account (like offers).
+CREATE TABLE IF NOT EXISTS subscriptions (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id       INTEGER NOT NULL,
+    name          TEXT    NOT NULL,
+    description   TEXT,
+    amount        REAL    NOT NULL,          -- monthly cost
+    user_card_id  INTEGER,                   -- optional: which wallet card pays for it
+    active        INTEGER NOT NULL DEFAULT 1, -- 0 = cancelled/paused, kept for the inactive count
+    created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id)      REFERENCES users(id)      ON DELETE CASCADE,
+    FOREIGN KEY (user_card_id) REFERENCES user_cards(id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_subscriptions_user ON subscriptions(user_id, active);
 CREATE INDEX IF NOT EXISTS idx_offers_user   ON offers(user_id, archived);
 CREATE INDEX IF NOT EXISTS idx_offer_reminders ON offer_reminders(offer_id);
 CREATE INDEX IF NOT EXISTS idx_benefits_card   ON benefits(card_id);

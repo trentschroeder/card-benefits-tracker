@@ -1,0 +1,147 @@
+{% extends 'base.html' %}
+{% block title %}Subscriptions — Card Benefits{% endblock %}
+{% block content %}
+
+<style>
+  .subs-page .sub-card { border-radius: 16px; padding: 1rem 1.1rem; }
+  .subs-page .sub-row { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; }
+  .subs-page .sub-info { min-width: 0; flex: 1 1 auto; }
+  .subs-page .sub-lead { display: flex; gap: .7rem; align-items: flex-start; }
+  .subs-page .sub-icon {
+    flex: 0 0 auto; width: 42px; height: 42px; border-radius: 12px;
+    display: flex; align-items: center; justify-content: center; font-size: 1.2rem;
+    color: var(--bs-link-color, #1a3c8a);
+    background: color-mix(in srgb, var(--bs-link-color, #1a3c8a) 16%, transparent);
+    border: 1px solid color-mix(in srgb, var(--bs-link-color, #1a3c8a) 30%, transparent);
+  }
+  .subs-page .sub-card.is-inactive .sub-icon,
+  .subs-page .sub-card.is-inactive .sub-name { color: var(--text-muted); }
+  .subs-page .sub-card.is-inactive { opacity: .85; }
+  .subs-page .sub-name { font-weight: 600; font-size: 1.05rem; line-height: 1.25; }
+  .subs-page .sub-amount { font-weight: 700; font-size: 1.1rem; white-space: nowrap; }
+  .subs-page .sub-amount small { font-weight: 500; color: var(--text-muted); font-size: .8rem; }
+  .subs-page .sub-desc { color: var(--text-muted); font-size: .88rem; margin-top: .1rem; }
+  .subs-page .sub-chip {
+    display: inline-flex; align-items: center; gap: .3rem; margin-top: .55rem;
+    font-size: .76rem; color: var(--text-muted);
+    background: color-mix(in srgb, var(--bg-card) 55%, var(--border-color) 45%);
+    border: 1px solid var(--border-color); padding: .22rem .55rem; border-radius: 999px;
+  }
+  .subs-page .sub-actions { display: flex; flex-direction: column; gap: .5rem; align-items: flex-end; white-space: nowrap; }
+  .subs-page .sub-actions .btn { display: inline-flex; align-items: center; justify-content: center; }
+  .subs-page .sub-actions-secondary { display: flex; gap: .5rem; }
+  @media (max-width: 768px) {
+    .subs-page .sub-card { padding: 1.1rem 1.15rem !important; }
+    .subs-page .sub-row { flex-direction: column; gap: 1rem; }
+    .subs-page .sub-actions { flex-direction: row; width: 100%; align-items: stretch; gap: .6rem; }
+    .subs-page .sub-actions > .sub-toggle { flex: 1 1 auto; min-height: 48px; }
+    .subs-page .sub-actions-secondary .btn { width: 52px; min-height: 48px; }
+  }
+</style>
+
+<div class="subs-page">
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h2 class="mb-0"><i class="bi bi-arrow-repeat me-2"></i>Subscriptions</h2>
+  <a href="{{ url_for('subscription_new') }}" class="btn btn-primary btn-sm">
+    <i class="bi bi-plus-lg me-1"></i>Add Subscription
+  </a>
+</div>
+
+<!-- Stats -->
+<div class="card mb-4 py-2 px-3">
+  <div class="row text-center g-0">
+    <div class="col-4 border-end">
+      <div class="fs-4 fw-bold text-primary">{{ active_count }}</div>
+      <div class="text-muted" style="font-size:.73rem;">Active</div>
+    </div>
+    <div class="col-4 border-end">
+      <div class="fs-4 fw-bold">{{ inactive_count }}</div>
+      <div class="text-muted" style="font-size:.73rem;">Inactive</div>
+    </div>
+    <div class="col-4">
+      <div class="fs-4 fw-bold text-success">${{ '%.2f' | format(monthly_total) }}</div>
+      <div class="text-muted" style="font-size:.73rem;">Per Month (active)</div>
+    </div>
+  </div>
+</div>
+
+{% if not active and not inactive %}
+<div class="text-center py-5 text-muted">
+  <i class="bi bi-arrow-repeat display-4 mb-3 d-block"></i>
+  No subscriptions yet. <a href="{{ url_for('subscription_new') }}">Add one</a> to start tracking
+  what you pay each month.
+</div>
+{% endif %}
+
+{% macro sub_card(s) %}
+<div class="card mb-3 sub-card{% if not s.active %} is-inactive{% endif %}">
+  <div class="sub-row">
+    <div class="sub-info">
+      <div class="sub-lead">
+        <div class="sub-icon"><i class="bi bi-arrow-repeat"></i></div>
+        <div style="min-width:0;">
+          <div class="d-flex align-items-baseline flex-wrap gap-2">
+            <span class="sub-name">{{ s.name }}</span>
+            {% if not s.active %}<span class="badge bg-secondary">Inactive</span>{% endif %}
+          </div>
+          {% if s.description %}<div class="sub-desc">{{ s.description }}</div>{% endif %}
+          {% if s.card_label %}
+            <span class="sub-chip"><i class="bi bi-credit-card"></i>{{ s.card_label }}</span>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+    <div class="d-flex flex-column align-items-end gap-2" style="white-space:nowrap;">
+      <div class="sub-amount">${{ '%.2f' | format(s.amount) }}<small>/mo</small></div>
+      <div class="sub-actions">
+        <form method="post" action="{{ url_for('subscription_toggle', id=s.id) }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button class="btn btn-outline-secondary btn-sm sub-toggle">
+            {% if s.active %}<i class="bi bi-pause-circle me-1"></i>Pause{% else %}<i class="bi bi-play-circle me-1"></i>Resume{% endif %}
+          </button>
+        </form>
+        <div class="sub-actions-secondary">
+          <a href="{{ url_for('subscription_edit', id=s.id) }}" class="btn btn-outline-secondary btn-sm" title="Edit" aria-label="Edit subscription">
+            <i class="bi bi-pencil"></i>
+          </a>
+          <button type="button" class="btn btn-outline-danger btn-sm" title="Delete" aria-label="Delete subscription"
+                  data-bs-toggle="modal" data-bs-target="#deleteSubModal{{ s.id }}">
+            <i class="bi bi-trash"></i>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="deleteSubModal{{ s.id }}" tabindex="-1">
+  <div class="modal-dialog modal-sm modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h6 class="modal-title text-danger">Delete subscription</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">Delete <strong>{{ s.name }}</strong>? This can't be undone.</div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+        <form method="post" action="{{ url_for('subscription_delete', id=s.id) }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button class="btn btn-danger btn-sm">Delete</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endmacro %}
+
+{% for s in active %}{{ sub_card(s) }}{% endfor %}
+
+{% if inactive %}
+<h6 class="text-muted mt-4 mb-3"><i class="bi bi-pause-circle me-1"></i>Inactive ({{ inactive_count }})</h6>
+{% for s in inactive %}{{ sub_card(s) }}{% endfor %}
+{% endif %}
+
+</div>{# /.subs-page #}
+
+{% endblock %}

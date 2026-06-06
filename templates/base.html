@@ -795,6 +795,14 @@
           </a>
         </li>
         {% endif %}
+        {% if g.user %}
+        <li class="nav-item">
+          <a class="nav-link {% if request.path.startswith('/subscriptions') %}active{% endif %}"
+             href="{{ url_for('subscriptions_list') }}">
+            <i class="bi bi-arrow-repeat me-1"></i>Subscriptions
+          </a>
+        </li>
+        {% endif %}
         {% if g.user and g.user.is_admin %}
         <li class="nav-item">
           <a class="nav-link {% if request.path == '/card-templates' %}active{% endif %}"
@@ -864,6 +872,13 @@
      href="{{ url_for('offers_list') }}">
     <i class="bi bi-tag-fill"></i>
     <span>Offers</span>
+  </a>
+  {% endif %}
+  {% if g.user %}
+  <a class="tab-item {% if request.path.startswith('/subscriptions') %}active{% endif %}"
+     href="{{ url_for('subscriptions_list') }}">
+    <i class="bi bi-arrow-repeat"></i>
+    <span>Subs</span>
   </a>
   {% endif %}
   {% if g.user %}

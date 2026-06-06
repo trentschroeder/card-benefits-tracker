@@ -1,0 +1,67 @@
+{% extends 'base.html' %}
+{% block title %}{% if subscription %}Edit {{ subscription.name }}{% else %}Add subscription{% endif %} — Card Benefits{% endblock %}
+{% block content %}
+
+{% set is_inactive = form.get('inactive') or form.get('active') == 0 %}
+
+<div class="d-flex align-items-center gap-2 mb-3">
+  <h2 class="mb-0">{% if subscription %}Edit subscription{% else %}Add a subscription{% endif %}</h2>
+</div>
+<p class="text-muted small mb-4">
+  Track a recurring service you pay for. The amount is the <strong>monthly</strong> cost —
+  it's what counts toward your "per month" total while the subscription is active.
+</p>
+
+<div class="card p-4 mb-4">
+  <form method="post">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+    <div class="mb-3">
+      <label class="form-label">Name <span class="text-danger">*</span></label>
+      <input name="name" type="text" class="form-control"
+             value="{{ form.get('name', '') }}" required autofocus
+             placeholder="e.g. Netflix, Spotify, iCloud+">
+    </div>
+
+    <div class="mb-3">
+      <label class="form-label">Monthly amount ($) <span class="text-danger">*</span></label>
+      <input name="amount" type="number" step="0.01" min="0" class="form-control"
+             value="{{ form.get('amount', '') or '' }}" required placeholder="0.00">
+    </div>
+
+    <div class="mb-3">
+      <label class="form-label">Description</label>
+      <input name="description" type="text" class="form-control"
+             value="{{ form.get('description', '') or '' }}"
+             placeholder="e.g. Family plan, shared with the kids">
+    </div>
+
+    <div class="mb-3">
+      <label class="form-label">Paid with</label>
+      <select name="user_card_id" class="form-select">
+        <option value="">— Not specified —</option>
+        {% set sel = form.get('user_card_id') %}
+        {% for c in wallet_cards %}
+          <option value="{{ c.id }}" {% if sel|string == c.id|string %}selected{% endif %}>{{ c.label }}</option>
+        {% endfor %}
+      </select>
+      <div class="form-text">Optionally tie this to a card in your wallet.</div>
+    </div>
+
+    <div class="mb-3 form-check form-switch">
+      <input name="inactive" type="checkbox" class="form-check-input" role="switch" id="inactiveSwitch"
+             {% if is_inactive %}checked{% endif %}>
+      <label class="form-check-label" for="inactiveSwitch">
+        Inactive (cancelled or paused)
+      </label>
+      <div class="form-text">Inactive subs still show in the list and count, but don't add to your monthly total.</div>
+    </div>
+
+    <div class="d-flex gap-2 mt-4">
+      <button class="btn btn-primary">Save</button>
+      <a href="{{ url_for('subscriptions_list') }}" class="btn btn-outline-secondary">Cancel</a>
+    </div>
+  </form>
+</div>
+
+{% endblock %}
