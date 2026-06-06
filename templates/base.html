@@ -770,6 +770,7 @@
   .impersonation-banner .btn-light { font-size: .8rem; padding: .15rem .55rem; }
 </style>
 {% endif %}
+{% if g.user %}
 <nav class="navbar navbar-expand-lg mb-4">
   <div class="container-lg">
     <a class="navbar-brand fw-bold" href="{{ url_for('dashboard') }}">
@@ -842,6 +843,7 @@
     </div>
   </div>
 </nav>
+{% endif %}
 
 <div class="container-lg">
   {% block content %}{% endblock %}
@@ -850,6 +852,7 @@
 <!-- iOS-style bottom tab bar (mobile only — desktop hides via CSS).
      Admin tabs (Templates, Users) are intentionally omitted: mobile users,
      admin or not, only get the non-admin navigation. -->
+{% if g.user %}
 <nav class="mobile-tabbar" role="navigation" aria-label="Primary">
   <a class="tab-item {% if request.path == '/' %}active{% endif %}"
      href="{{ url_for('dashboard') }}">
@@ -877,6 +880,7 @@
   </a>
   {% endif %}
 </nav>
+{% endif %}
 
 <!-- Add-to-Home-Screen hint: shown by JS only on mobile browsers that aren't
      already running the installed (standalone) app, and not yet dismissed. -->
