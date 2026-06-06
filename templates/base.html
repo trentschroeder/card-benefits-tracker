@@ -222,6 +222,31 @@
     .navbar-brand { color: var(--text-nav-brand) !important; font-weight: 700; }
     .navbar .nav-link:hover { color: var(--text-nav-hover) !important; }
     .navbar .nav-link.active { color: var(--text-nav-hover) !important; font-weight: 600; }
+    /* Separator between the main modules and the admin/account menus */
+    .nav-vr { display:inline-block; width:1px; height:1.4rem; background: var(--text-nav); opacity:.28; }
+    /* Navbar dropdowns (Admin / Account) — themed to match cards, not Bootstrap white */
+    .navbar .dropdown-menu {
+      background: var(--bg-modal);
+      border: 1px solid var(--border-color);
+      box-shadow: var(--card-shadow);
+      border-radius: 10px;
+      padding: .35rem;
+    }
+    .navbar .dropdown-item {
+      color: var(--text-primary);
+      border-radius: 7px;
+      padding: .45rem .7rem;
+    }
+    .navbar .dropdown-item:hover, .navbar .dropdown-item:focus {
+      background: color-mix(in srgb, var(--bg-modal) 80%, var(--text-primary) 12%);
+      color: var(--text-primary);
+    }
+    .navbar .dropdown-item.active {
+      background: var(--toggle-active);
+      color: var(--text-nav-hover);
+    }
+    .navbar .dropdown-header { color: var(--text-muted); }
+    .navbar .dropdown-divider { border-top-color: var(--border-color); }
 
     /* ── Theme toggle ─────────────────────────────────────────── */
     .theme-toggle {
@@ -803,35 +828,40 @@
           </a>
         </li>
         {% endif %}
-        {% if g.user and g.user.is_admin %}
-        <li class="nav-item">
-          <a class="nav-link {% if request.path == '/card-templates' %}active{% endif %}"
-             href="{{ url_for('card_templates') }}">
-            <i class="bi bi-collection me-1"></i>Card Templates
-          </a>
+        {# Separator between the three main modules and the admin/account menus #}
+        {% if g.user %}
+        <li class="nav-item d-none d-lg-flex align-items-center" aria-hidden="true">
+          <span class="nav-vr mx-2"></span>
         </li>
         {% endif %}
         {% if g.user and g.user.is_admin %}
-        <li class="nav-item">
-          <a class="nav-link {% if request.path.startswith('/users') %}active{% endif %}"
-             href="{{ url_for('users_list') }}">
-            <i class="bi bi-people me-1"></i>Users
+        {% set on_admin = request.path == '/card-templates' or request.path.startswith('/users') %}
+        <li class="nav-item dropdown">
+          <a class="nav-link dropdown-toggle {% if on_admin %}active{% endif %}" href="#" role="button"
+             data-bs-toggle="dropdown" aria-expanded="false">
+            <i class="bi bi-shield-lock me-1"></i>Admin
           </a>
+          <ul class="dropdown-menu dropdown-menu-end">
+            <li><a class="dropdown-item {% if request.path == '/card-templates' %}active{% endif %}"
+                   href="{{ url_for('card_templates') }}"><i class="bi bi-collection me-2"></i>Card Templates</a></li>
+            <li><a class="dropdown-item {% if request.path.startswith('/users') %}active{% endif %}"
+                   href="{{ url_for('users_list') }}"><i class="bi bi-people me-2"></i>Users</a></li>
+          </ul>
         </li>
         {% endif %}
         {% if g.user %}
-        <li class="nav-item">
-          <a class="nav-link {% if request.path == '/settings' %}active{% endif %}"
-             href="{{ url_for('settings') }}">
-            <i class="bi bi-gear me-1"></i>Settings
+        <li class="nav-item dropdown">
+          <a class="nav-link dropdown-toggle {% if request.path == '/settings' %}active{% endif %}" href="#" role="button"
+             data-bs-toggle="dropdown" aria-expanded="false">
+            <i class="bi bi-person-circle me-1"></i>Account
           </a>
-        </li>
-        {% endif %}
-        {% if g.user %}
-        <li class="nav-item">
-          <a class="nav-link" href="{{ url_for('logout') }}">
-            <i class="bi bi-box-arrow-right me-1"></i>Logout
-          </a>
+          <ul class="dropdown-menu dropdown-menu-end">
+            <li><h6 class="dropdown-header text-truncate" style="max-width:240px;">{{ g.user.email }}</h6></li>
+            <li><a class="dropdown-item {% if request.path == '/settings' %}active{% endif %}"
+                   href="{{ url_for('settings') }}"><i class="bi bi-gear me-2"></i>Settings</a></li>
+            <li><hr class="dropdown-divider"></li>
+            <li><a class="dropdown-item" href="{{ url_for('logout') }}"><i class="bi bi-box-arrow-right me-2"></i>Log out</a></li>
+          </ul>
         </li>
         {% endif %}
         <li class="nav-item theme-toggle-item ms-1">
