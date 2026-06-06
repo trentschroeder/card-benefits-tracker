@@ -77,6 +77,14 @@
     align-items: flex-end; white-space: nowrap;
   }
   .offers-page .offer-actions-secondary { display: flex; gap: .5rem; }
+  /* Center each button's icon/text on both axes so the Redeem, edit and delete
+     icons line up — Bootstrap's inline-block .btn would otherwise top-align the
+     glyph inside our taller (min-height) buttons. */
+  .offers-page .offer-actions .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
 
   @media (max-width: 768px) {
     .offers-page .offer-card { padding: 1.1rem 1.15rem !important; }
