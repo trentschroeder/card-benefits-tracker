@@ -851,11 +851,14 @@ def enrich_offer(db, offer, today=None):
         o['fully_used'] = False
 
     exp = o.get('expiration_date')
+    o['expiration_display'] = None
     if exp:
         try:
             exp_date = date.fromisoformat(str(exp))
             o['days_left'] = (exp_date - today).days
             o['expired']   = o['days_left'] < 0
+            o['expiration_display'] = exp_date.strftime('%b %-d, %Y') if os.name != 'nt' \
+                else exp_date.strftime('%b %#d, %Y')
         except (ValueError, TypeError):
             o['days_left'] = None
             o['expired']   = False

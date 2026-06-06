@@ -3,38 +3,91 @@
 {% block content %}
 
 <style>
-  /* Offer cards: side-by-side on desktop, stacked + full-width on mobile so a
-     few offers fill the screen comfortably with finger-friendly tap targets. */
+  .offers-page .offer-card {
+    border-radius: 16px;
+    padding: 1rem 1.1rem;
+    transition: transform .12s ease, box-shadow .2s ease;
+  }
   .offers-page .offer-row {
     display: flex;
     justify-content: space-between;
     align-items: flex-start;
-    gap: .75rem;
+    gap: 1rem;
   }
-  .offers-page .offer-actions {
-    display: flex;
-    flex-direction: column;
-    gap: .5rem;
-    align-items: flex-end;
+  .offers-page .offer-info { min-width: 0; flex: 1 1 auto; }
+
+  /* Leading icon + title */
+  .offers-page .offer-lead { display: flex; gap: .7rem; align-items: flex-start; }
+  .offers-page .offer-icon {
+    flex: 0 0 auto;
+    width: 42px; height: 42px;
+    border-radius: 12px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 1.2rem;
+    color: var(--bs-link-color, #1a3c8a);
+    background: color-mix(in srgb, var(--bs-link-color, #1a3c8a) 16%, transparent);
+    border: 1px solid color-mix(in srgb, var(--bs-link-color, #1a3c8a) 30%, transparent);
+  }
+  .offers-page .offer-card.is-expired .offer-icon {
+    color: var(--text-muted);
+    background: color-mix(in srgb, var(--text-muted) 14%, transparent);
+    border-color: var(--border-color);
+  }
+  .offers-page .offer-headwrap { min-width: 0; }
+  .offers-page .offer-name { font-weight: 600; font-size: 1.05rem; line-height: 1.25; }
+  .offers-page .offer-desc { color: var(--text-muted); font-size: .88rem; margin-top: .1rem; }
+
+  /* Urgency pill */
+  .offers-page .offer-pill {
+    display: inline-block; vertical-align: middle;
+    font-size: .72rem; font-weight: 700; line-height: 1;
+    padding: .28rem .55rem; border-radius: 999px; margin-left: .15rem;
     white-space: nowrap;
   }
+  .offers-page .pill-ok   { background: color-mix(in srgb, #16a34a 22%, transparent); color: #16a34a; }
+  .offers-page .pill-warn { background: color-mix(in srgb, #ea7317 24%, transparent); color: #f08a2c; }
+  .offers-page .pill-danger { background: color-mix(in srgb, #dc2626 24%, transparent); color: #f1556b; }
+
+  /* Balance */
+  .offers-page .offer-balance-line { margin-top: .7rem; display: flex; align-items: baseline; gap: .4rem; }
+  .offers-page .offer-balance { font-size: 1.25rem; font-weight: 700; letter-spacing: -.01em; }
+  .offers-page .offer-balance-sub { color: var(--text-muted); font-size: .85rem; }
+
+  /* Remaining-value bar (full = lots left) */
+  .offers-page .offer-bar {
+    height: 8px; border-radius: 999px; margin-top: .45rem;
+    background: var(--progress-bg); overflow: hidden;
+  }
+  .offers-page .offer-bar > span { display: block; height: 100%; border-radius: 999px; transition: width .3s ease; }
+
+  /* Info chips */
+  .offers-page .offer-chips { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: .65rem; }
+  .offers-page .offer-chip {
+    display: inline-flex; align-items: center; gap: .3rem;
+    font-size: .76rem; color: var(--text-muted);
+    background: color-mix(in srgb, var(--bg-card) 55%, var(--border-color) 45%);
+    border: 1px solid var(--border-color);
+    padding: .22rem .55rem; border-radius: 999px;
+  }
+  .offers-page .offer-chip i { font-size: .8rem; opacity: .85; }
+
+  /* Actions */
+  .offers-page .offer-actions {
+    display: flex; flex-direction: column; gap: .5rem;
+    align-items: flex-end; white-space: nowrap;
+  }
   .offers-page .offer-actions-secondary { display: flex; gap: .5rem; }
-  .offers-page .offer-progress { max-width: 320px; }
 
   @media (max-width: 768px) {
     .offers-page .offer-card { padding: 1.1rem 1.15rem !important; }
     .offers-page .offer-row { flex-direction: column; gap: 1rem; }
-    .offers-page .offer-name { font-size: 1.08rem; }
-    .offers-page .offer-meta { font-size: .92rem; row-gap: .35rem !important; }
-    .offers-page .offer-progress { max-width: none; height: 8px !important; }
-    /* Action row spans the full width: a big primary button + icon buttons. */
+    .offers-page .offer-name { font-size: 1.1rem; }
+    .offers-page .offer-balance { font-size: 1.35rem; }
+    /* Action row spans full width: big primary button + icon buttons */
     .offers-page .offer-actions {
-      flex-direction: row;
-      width: 100%;
-      align-items: stretch;
-      gap: .6rem;
+      flex-direction: row; width: 100%; align-items: stretch; gap: .6rem;
     }
-    .offers-page .offer-actions > .offer-redeem { flex: 1 1 auto; min-height: 48px; }
+    .offers-page .offer-actions > .offer-redeem { flex: 1 1 auto; min-height: 48px; font-size: 15px; }
     .offers-page .offer-actions-secondary { flex: 0 0 auto; }
     .offers-page .offer-actions-secondary .btn { width: 52px; min-height: 48px; }
   }
@@ -63,41 +116,51 @@
 {% endif %}
 
 {% for o in offers %}
-<div class="card p-3 mb-3 offer-card">
+<div class="card mb-3 offer-card{% if o.expired %} is-expired{% endif %}">
   <div class="offer-row">
-    <div class="offer-info flex-grow-1">
-      <div class="d-flex align-items-center flex-wrap gap-2">
-        <span class="fw-semibold offer-name">{{ o.name }}</span>
-        {% if o.expiration_date %}
-          {% if o.expired %}
-            <span class="badge bg-danger">Expired</span>
-          {% elif o.days_left is not none and o.days_left <= 3 %}
-            <span class="badge bg-danger">{{ 'Expires today' if o.days_left <= 0 else o.days_left ~ ' day' ~ ('s' if o.days_left != 1 else '') ~ ' left' }}</span>
-          {% elif o.days_left is not none and o.days_left <= 7 %}
-            <span class="badge bg-warning text-dark">{{ o.days_left }} days left</span>
-          {% else %}
-            <span class="badge bg-success-subtle text-success">{{ o.days_left }} days left</span>
-          {% endif %}
-        {% endif %}
-      </div>
-      {% if o.description %}<div class="text-muted small mt-1">{{ o.description }}</div>{% endif %}
-
-      <div class="text-muted small mt-2 d-flex flex-wrap gap-3 offer-meta">
-        {% if o.amount is not none %}
-          <span><i class="bi bi-cash-coin me-1"></i>${{ '%.2f' | format(o.remaining) }} of ${{ '%.2f' | format(o.amount) }} left</span>
-        {% endif %}
-        {% if o.expiration_date %}
-          <span><i class="bi bi-calendar-event me-1"></i>Expires {{ o.expiration_date }}</span>
-        {% endif %}
-        {% if o.reminder_days %}
-          <span><i class="bi bi-bell me-1"></i>{{ o.reminder_days | join(', ') }} days before</span>
-        {% endif %}
+    <div class="offer-info">
+      <div class="offer-lead">
+        <div class="offer-icon">
+          <i class="bi {{ 'bi-gift' if o.amount is not none else 'bi-ticket-perforated' }}"></i>
+        </div>
+        <div class="offer-headwrap">
+          <div>
+            <span class="offer-name">{{ o.name }}</span>
+            {% if o.expiration_date and o.days_left is not none %}
+              {% if o.expired %}
+                <span class="offer-pill pill-danger">Expired</span>
+              {% elif o.days_left <= 3 %}
+                <span class="offer-pill pill-danger">{{ 'Today' if o.days_left <= 0 else o.days_left ~ 'd left' }}</span>
+              {% elif o.days_left <= 7 %}
+                <span class="offer-pill pill-warn">{{ o.days_left }}d left</span>
+              {% else %}
+                <span class="offer-pill pill-ok">{{ o.days_left }}d left</span>
+              {% endif %}
+            {% endif %}
+          </div>
+          {% if o.description %}<div class="offer-desc">{{ o.description }}</div>{% endif %}
+        </div>
       </div>
 
       {% if o.amount is not none %}
-      <div class="progress mt-2 offer-progress" style="height:6px;">
-        <div class="progress-bar {{ 'bg-success' if o.pct_used >= 60 else 'bg-warning' }}"
-             role="progressbar" style="width: {{ o.pct_used }}%;"></div>
+        {% set rem_pct = 100 - o.pct_used %}
+        <div class="offer-balance-line">
+          <span class="offer-balance">${{ '%.2f' | format(o.remaining) }}</span>
+          <span class="offer-balance-sub">left of ${{ '%.2f' | format(o.amount) }}</span>
+        </div>
+        <div class="offer-bar">
+          <span style="width: {{ rem_pct }}%; background: {{ '#16a34a' if rem_pct >= 50 else ('#ea7317' if rem_pct >= 20 else '#dc2626') }};"></span>
+        </div>
+      {% endif %}
+
+      {% if o.expiration_display or o.reminder_days %}
+      <div class="offer-chips">
+        {% if o.expiration_display %}
+          <span class="offer-chip"><i class="bi bi-calendar-event"></i>Expires {{ o.expiration_display }}</span>
+        {% endif %}
+        {% if o.reminder_days %}
+          <span class="offer-chip"><i class="bi bi-bell"></i>{{ o.reminder_days | join(', ') }}d before</span>
+        {% endif %}
       </div>
       {% endif %}
     </div>
