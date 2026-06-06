@@ -784,7 +784,7 @@
         <li class="nav-item">
           <a class="nav-link {% if request.path == '/' %}active{% endif %}"
              href="{{ url_for('dashboard') }}">
-            <i class="bi bi-wallet2 me-1"></i>My Wallet
+            <i class="bi bi-wallet2 me-1"></i>Card Benefits
           </a>
         </li>
         {% if g.user %}
@@ -865,7 +865,7 @@
   <a class="tab-item {% if request.path == '/' %}active{% endif %}"
      href="{{ url_for('dashboard') }}">
     <i class="bi bi-wallet2"></i>
-    <span>My Wallet</span>
+    <span>Benefits</span>
   </a>
   {% if g.user %}
   <a class="tab-item {% if request.path.startswith('/offers') %}active{% endif %}"
