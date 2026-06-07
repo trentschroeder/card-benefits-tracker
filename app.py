@@ -16,7 +16,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 from periods import get_current_period, days_left, PERIOD_LABELS
 from email_sender import (send_reminder_email, send_invite_email,
                            send_reset_email, send_link_invite_email,
-                           send_card_request_email)
+                           send_card_request_email, send_subscription_digest_email)
 
 app = Flask(__name__)
 
@@ -3102,6 +3102,37 @@ def send_test_reminder():
     return redirect(url_for('settings'))
 
 
+@app.route('/email/test-subscription-digest', methods=['POST'])
+@login_required
+def send_test_subscription_digest():
+    """Send the current user the monthly subscriptions digest right now, so they
+    can preview it. Admin may override the recipient for SMTP tests."""
+    db = get_db()
+    gmail_user = get_setting(db, 'gmail_user')
+    gmail_pass = get_setting(db, 'gmail_app_password')
+    if not all([gmail_user, gmail_pass]):
+        db.close()
+        flash('Gmail credentials are not configured. Ask the administrator to set them up.', 'danger')
+        return redirect(url_for('settings'))
+
+    recipient = g.user['email']
+    test_recipient = request.form.get('test_recipient', '').strip() or None
+    if test_recipient and g.user['is_admin']:
+        recipient = test_recipient
+    subs, total = _active_subscriptions_for(db, g.user['id'])
+    db.close()
+
+    if not subs:
+        flash('You have no active subscriptions to summarize.', 'info')
+        return redirect(url_for('subscriptions_list'))
+    try:
+        send_subscription_digest_email(gmail_user, gmail_pass, recipient, subs, total)
+        flash(f'Subscriptions summary sent to {recipient} — {len(subs)} active, ${total:,.2f}/mo.', 'success')
+    except Exception as e:
+        flash(f'Failed to send email: {e}', 'danger')
+    return redirect(url_for('settings'))
+
+
 # ── Offers (gift cards / coupons / promotions) ──────────────────────────────────
 
 def _offer_form_ctx(selected_days):
@@ -3595,6 +3626,67 @@ def _run_reminder_check(force=False):
     return total_sent
 
 
+# ── Monthly subscription digest ─────────────────────────────────────────────────
+
+def _active_subscriptions_for(db, uid):
+    """Active subscriptions in the user's shared wallet (their own + a linked
+    partner's), as ([{name, amount, card_label}], monthly_total)."""
+    ids = linked_user_ids(db, uid)
+    ph  = ','.join('?' * len(ids))
+    rows = db.execute(f'''
+        SELECT s.name, s.amount, COALESCE(uc.nickname, c.name) AS card_label
+        FROM subscriptions s
+        LEFT JOIN user_cards uc ON uc.id = s.user_card_id
+        LEFT JOIN cards c       ON c.id = uc.card_id
+        WHERE s.user_id IN ({ph}) AND s.active = 1
+        ORDER BY s.amount DESC, s.name
+    ''', (*ids,)).fetchall()
+    subs  = [{'name': r['name'], 'amount': r['amount'], 'card_label': r['card_label']} for r in rows]
+    total = sum(r['amount'] for r in rows)
+    return subs, total
+
+
+def _run_subscription_digest(force=False):
+    """Send the monthly 'your active subscriptions' awareness email to every user
+    with summary_enabled = 1, at their account email. Deduped per recipient per
+    calendar month (force=True bypasses). Users with no active subs are skipped.
+    Returns the number of digests sent."""
+    db = get_db()
+    gmail_user = get_setting(db, 'gmail_user')
+    gmail_pass = get_setting(db, 'gmail_app_password')
+    if not all([gmail_user, gmail_pass]):
+        db.close()
+        return 0
+
+    period_ym = today_in_tz(db).strftime('%Y-%m')
+    users = db.execute('SELECT id, email FROM users WHERE summary_enabled = 1').fetchall()
+    sent = 0
+    for user in users:
+        uid       = user['id']
+        recipient = user['email']
+        if not recipient:
+            continue
+        if not force and db.execute(
+            'SELECT 1 FROM subscription_digest_sends WHERE recipient_user_id = ? AND period_ym = ?',
+            (uid, period_ym)).fetchone():
+            continue
+        subs, total = _active_subscriptions_for(db, uid)
+        if not subs:
+            continue
+        try:
+            send_subscription_digest_email(gmail_user, gmail_pass, recipient, subs, total)
+            db.execute(
+                'INSERT OR IGNORE INTO subscription_digest_sends (recipient_user_id, period_ym) VALUES (?, ?)',
+                (uid, period_ym))
+            db.commit()
+            sent += 1
+        except Exception as e:
+            app.logger.error(f'Failed to send subscription digest to user {uid} ({recipient}): {e}')
+            db.rollback()
+    db.close()
+    return sent
+
+
 # ── Scheduler ──────────────────────────────────────────────────────────────────
 
 _scheduler = None
@@ -3620,6 +3712,9 @@ def _reschedule_reminder(hour, tz=DEFAULT_TZ):
     try:
         _scheduler.reschedule_job('daily_reminder', trigger='cron',
                                   hour=hour, minute=0, timezone=valid_tz(tz))
+        # Monthly subscription digest fires on the 1st at the same hour/zone.
+        _scheduler.reschedule_job('monthly_subscription_digest', trigger='cron',
+                                  day=1, hour=hour, minute=0, timezone=valid_tz(tz))
     except Exception:
         pass
 
@@ -3634,6 +3729,10 @@ def start_scheduler(hour=8, tz=DEFAULT_TZ):
     _scheduler.add_job(_run_reminder_check, 'cron', id='daily_reminder',
                        hour=hour, minute=0, timezone=valid_tz(tz),
                        misfire_grace_time=3600)
+    # Monthly awareness digest of active subscriptions, 1st of the month.
+    _scheduler.add_job(_run_subscription_digest, 'cron', id='monthly_subscription_digest',
+                       day=1, hour=hour, minute=0, timezone=valid_tz(tz),
+                       misfire_grace_time=6 * 3600)
     _scheduler.start()
 
 

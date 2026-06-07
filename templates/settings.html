@@ -179,6 +179,30 @@
       </form>
     </div>
 
+    <!-- Subscriptions summary now (every user) -->
+    <div class="card p-4 mb-4">
+      <h5 class="mb-3"><i class="bi bi-arrow-repeat me-2"></i>Subscriptions Summary</h5>
+      <p class="text-muted small">
+        A monthly email lists your active subscriptions and what they cost per month —
+        sent automatically on the 1st. Send yourself a copy now to preview it.
+      </p>
+      <form method="post" action="{{ url_for('send_test_subscription_digest') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        {% if g.user.is_admin %}
+        <div class="mb-3">
+          <label class="form-label">Override recipient
+            <span class="text-muted">(admin SMTP test, optional)</span></label>
+          <input name="test_recipient" type="email" class="form-control"
+                 placeholder="leave blank to send to yourself">
+          <div class="form-text">If set, the email goes only to this address.</div>
+        </div>
+        {% endif %}
+        <button class="btn btn-outline-primary">
+          <i class="bi bi-envelope me-1"></i>Send Subscriptions Summary
+        </button>
+      </form>
+    </div>
+
     {% if g.user.is_admin %}
     <div class="card p-4">
       <h5 class="mb-3"><i class="bi bi-info-circle me-2"></i>How Reminders Work

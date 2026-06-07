@@ -320,3 +320,85 @@ def send_card_request_email(gmail_user, gmail_app_password, recipients,
     with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
         server.login(gmail_user, gmail_app_password)
         server.sendmail(gmail_user, recipients, msg.as_string())
+
+
+def send_subscription_digest_email(gmail_user, gmail_app_password, recipient, subs, monthly_total):
+    """Monthly awareness digest: every active subscription and what it costs per
+    month. `subs` is a list of dicts with keys: name, amount, card_label (or None).
+    No-op when there are no active subscriptions."""
+    if not subs:
+        return
+
+    n = len(subs)
+    font = "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif"
+    yearly = monthly_total * 12
+    subject = f"Your subscriptions: ${monthly_total:,.2f}/mo across {n} active"
+
+    rows = ""
+    for s in subs:
+        sub_line = (f'<div style="font:400 12px {font};color:#8a93a6;margin-top:2px;">{escape(s["card_label"])}</div>'
+                    if s.get("card_label") else "")
+        rows += f"""
+        <tr>
+          <td style="padding:11px 0;border-top:1px solid #eef1f6;">
+            <div style="font:600 15px {font};color:#1a2233;">{escape(s['name'])}</div>
+            {sub_line}
+          </td>
+          <td align="right" style="padding:11px 0;border-top:1px solid #eef1f6;white-space:nowrap;
+              font:700 15px {font};color:#1a2233;">${s['amount']:,.2f}<span style="font:400 12px {font};color:#8a93a6;">/mo</span></td>
+        </tr>"""
+
+    preheader = f"You're paying ${monthly_total:,.2f}/month across {n} active subscription{'s' if n != 1 else ''}."
+    html = f"""<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#eef1f6;">
+  <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:#eef1f6;">{preheader}</div>
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#eef1f6;">
+    <tr><td align="center" style="padding:24px 12px;">
+      <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0"
+             style="width:600px;max-width:100%;background:#ffffff;border-radius:14px;overflow:hidden;border:1px solid #e1e6f0;">
+        <tr><td style="background:#1a3c8a;padding:20px 24px;">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+            <td style="font:700 18px {font};color:#ffffff;">&#129689;&nbsp; Dimes</td>
+            <td align="right" style="font:600 12px {font};color:#aac4ff;letter-spacing:.04em;text-transform:uppercase;">Subscriptions</td>
+          </tr></table>
+        </td></tr>
+        <tr><td style="padding:24px 24px 6px;">
+          <div style="font:700 19px {font};color:#1a2233;">Your active subscriptions</div>
+          <div style="font:400 14px {font};color:#5b6472;margin-top:6px;line-height:1.5;">
+            A monthly check-in on what you're subscribed to and what it costs.
+          </div>
+        </td></tr>
+        <tr><td style="padding:6px 24px 0;">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">{rows}</table>
+        </td></tr>
+        <tr><td style="padding:16px 24px 4px;">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
+                 style="background:#f4f7fc;border:1px solid #e1e6f0;border-radius:10px;"><tr>
+            <td style="padding:14px 16px;font:600 14px {font};color:#5b6472;">Total
+              <div style="font:400 12px {font};color:#8a93a6;">&#8776; ${yearly:,.0f}/year</div>
+            </td>
+            <td align="right" style="padding:14px 16px;font:800 22px {font};color:#1a2233;white-space:nowrap;">
+              ${monthly_total:,.2f}<span style="font:400 13px {font};color:#8a93a6;">/mo</span></td>
+          </tr></table>
+        </td></tr>
+        <tr><td style="padding:8px 24px 26px;">
+          <div style="border-top:1px solid #eef1f6;padding-top:16px;font:400 12px {font};color:#98a2b3;line-height:1.6;">
+            Sent monthly by <a href="https://dimes.trentschroeder.com" style="color:#1a3c8a;text-decoration:none;">Dimes</a>
+            to keep your subscriptions visible. Manage them anytime from the Subscriptions page.
+          </div>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body></html>"""
+
+    msg = MIMEMultipart('alternative')
+    msg['Subject'] = subject
+    msg['From'] = gmail_user
+    msg['To'] = recipient
+    msg.attach(MIMEText(html, 'html'))
+
+    with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
+        server.login(gmail_user, gmail_app_password)
+        server.sendmail(gmail_user, recipient, msg.as_string())

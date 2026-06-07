@@ -254,6 +254,17 @@ CREATE TABLE IF NOT EXISTS subscriptions (
     FOREIGN KEY (user_card_id) REFERENCES user_cards(id) ON DELETE SET NULL
 );
 
+-- Dedup log for the monthly "your active subscriptions" awareness digest, keyed
+-- by recipient + calendar month so each linked partner gets it at most once a month.
+CREATE TABLE IF NOT EXISTS subscription_digest_sends (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    recipient_user_id INTEGER NOT NULL,
+    period_ym         TEXT    NOT NULL,   -- 'YYYY-MM'
+    sent_at           TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(recipient_user_id, period_ym),
+    FOREIGN KEY (recipient_user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
 CREATE INDEX IF NOT EXISTS idx_subscriptions_user ON subscriptions(user_id, active);
 CREATE INDEX IF NOT EXISTS idx_offers_user   ON offers(user_id, archived);
 CREATE INDEX IF NOT EXISTS idx_offer_reminders ON offer_reminders(offer_id);
