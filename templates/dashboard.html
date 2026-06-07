@@ -7,7 +7,7 @@
   .card-section {
     background: var(--bg-card);
     border: 1px solid var(--border-color);
-    border-radius: 10px;
+    border-radius: 16px;
     box-shadow: var(--card-shadow);
     overflow: hidden;
   }
@@ -17,6 +17,14 @@
     gap: 10px;
     padding: 12px 16px;
     border-bottom: 1px solid var(--border-color);
+  }
+  /* Leading tinted icon, matching the Offers/Subscriptions card icon */
+  .card-section-icon {
+    flex: 0 0 auto; width: 36px; height: 36px; border-radius: 11px;
+    display: flex; align-items: center; justify-content: center; font-size: 1.05rem;
+    color: var(--bs-link-color, #1a3c8a);
+    background: color-mix(in srgb, var(--bs-link-color, #1a3c8a) 16%, transparent);
+    border: 1px solid color-mix(in srgb, var(--bs-link-color, #1a3c8a) 30%, transparent);
   }
   .card-section-title {
     font-size: 1.05rem;
@@ -112,25 +120,22 @@
   }
   .row-amount.remaining { color: var(--text-primary); font-weight: 600; }
 
+  /* Tinted pill, matching the Offers "days left" pill vocabulary */
   .days-badge {
     display: inline-block;
     font-size: .65rem;
     font-weight: 700;
-    padding: 2px 6px;
-    border-radius: 4px;
+    padding: 3px 8px;
+    border-radius: 999px;
     white-space: nowrap;
     flex-shrink: 0;
     min-width: 38px;
     text-align: center;
   }
-  .days-badge-high { background: #dc3545; color: #fff; }
-  .days-badge-med  { background: #e67e22; color: #fff; }
-  .days-badge-low  { background: var(--bg-table-head); color: var(--text-muted); }
-  .days-badge-done { background: #d1e7dd; color: #0a3622; }
-  [data-theme="dark"] .days-badge-done { background: #0d2b1e; color: #5cb88a; }
-  [data-theme="ai"]   .days-badge-done { background: rgba(0,255,120,.12); color: #00ff99; border: 1px solid rgba(0,255,120,.3); }
-  [data-theme="ai"]   .days-badge-high { box-shadow: 0 0 6px rgba(255,0,80,.5); }
-  [data-theme="ai"]   .days-badge-med  { box-shadow: 0 0 6px rgba(255,120,0,.4); }
+  .days-badge-high { background: color-mix(in srgb, #dc2626 22%, transparent); color: #f1556b; }
+  .days-badge-med  { background: color-mix(in srgb, #ea7317 24%, transparent); color: #f08a2c; }
+  .days-badge-low  { background: color-mix(in srgb, var(--text-muted) 18%, transparent); color: var(--text-muted); }
+  .days-badge-done { background: color-mix(in srgb, #16a34a 22%, transparent); color: #16a34a; }
 
   .row-action {
     flex-shrink: 0;
@@ -173,7 +178,7 @@
     gap: 8px;
     cursor: pointer;
     user-select: none;
-    border-radius: 0 0 8px 8px;
+    border-radius: 0 0 16px 16px;
   }
   .done-footer:hover { color: var(--text-primary); }
   .done-section { border-top: 1px dashed var(--border-color); }
@@ -431,8 +436,9 @@
 <div class="card-section mb-4">
   <!-- Card header -->
   <div class="card-section-header">
+    <div class="card-section-icon"><i class="bi bi-credit-card-2-front"></i></div>
     <div class="card-section-title">
-      <i class="bi bi-credit-card-2-front me-2 text-muted"></i>{{ dc.display_name }}
+      {{ dc.display_name }}
       {% if dc.nickname %}<span class="text-muted ms-1" style="font-size:.75rem;">({{ card.name }})</span>{% endif %}
     </div>
     {% if roi.max_possible > 0 %}
