@@ -5,7 +5,10 @@
 
 <div class="d-flex justify-content-between align-items-center mb-3">
   <h2 class="mb-0"><i class="bi bi-tag-fill me-2"></i>Offers</h2>
-  <a href="{{ url_for('offer_new') }}" class="btn btn-primary btn-sm">
+  {# href is the no-JS fallback; with JS the data-bs-* attributes open the modal. #}
+  <a href="{{ url_for('offer_new') }}" class="btn btn-primary btn-sm"
+     data-bs-toggle="modal" data-bs-target="#offerModal"
+     data-reminders="{{ default_reminder_days | join(',') }}">
     <i class="bi bi-plus-lg me-1"></i>Add Offer
   </a>
 </div>
@@ -32,7 +35,14 @@
       <div class="benefit-row {{ rowc }}">
         <span class="row-dot {{ dotc }}" style="background:{{ dot }};"></span>
 
-        <a href="{{ url_for('offer_edit', id=o.id) }}" class="row-name" style="text-decoration:none;color:inherit;">
+        <a href="{{ url_for('offer_edit', id=o.id) }}" class="row-name" style="text-decoration:none;color:inherit;"
+           data-bs-toggle="modal" data-bs-target="#offerModal"
+           data-action="{{ url_for('offer_edit', id=o.id) }}"
+           data-delete-action="{{ url_for('offer_delete', id=o.id) }}"
+           data-name="{{ o.name }}" data-description="{{ o.description or '' }}"
+           data-amount="{{ '%.2f' | format(o.amount) if o.amount is not none else '' }}"
+           data-expiration="{{ o.expiration_date or '' }}"
+           data-reminders="{{ o.reminder_days | join(',') }}">
           {{ o.name }}
           {% if o.description %}
             <i class="bi bi-info-circle row-info-icon ms-1" data-bs-toggle="tooltip" title="{{ o.description }}"></i>
@@ -113,4 +123,149 @@
 </div>
 {% endfor %}
 
+{# ── Reusable Add/Edit modal — populated by JS from the trigger's data-* ── #}
+<div class="modal fade" id="offerModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h6 class="modal-title" id="offerModalTitle">Add an offer</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <form method="post" id="offerForm"
+            action="{{ url_for('offer_new') }}"
+            data-new-action="{{ url_for('offer_new') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="modal-body">
+          <div class="mb-3">
+            <label class="form-label">Name <span class="text-danger">*</span></label>
+            <input name="name" type="text" class="form-control" required autofocus
+                   placeholder="e.g. Amazon gift card, REI 20% off coupon">
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Description</label>
+            <input name="description" type="text" class="form-control"
+                   placeholder="e.g. From birthday, or code SAVE20 at checkout">
+          </div>
+          <div class="row">
+            <div class="col-sm-6 mb-3">
+              <label class="form-label">Starting amount ($)</label>
+              <input name="amount" type="number" step="0.01" min="0" class="form-control"
+                     placeholder="Leave blank for a one-time coupon">
+              <div class="form-text">Leave blank to track as used / not-used instead of by balance.</div>
+            </div>
+            <div class="col-sm-6 mb-3">
+              <label class="form-label">Expiration date</label>
+              <input name="expiration_date" type="date" class="form-control" id="offerExpiration">
+              <div class="form-text">Optional. Required for reminder emails.</div>
+            </div>
+          </div>
+          <div class="mb-1">
+            <label class="form-label d-block mb-1"><i class="bi bi-bell me-1"></i>Email reminders</label>
+            <div class="form-text mb-2" id="offerReminderHint">
+              Send a nudge this many days before the expiration date.
+            </div>
+            <div class="d-flex flex-wrap gap-3">
+              {% for days in offer_reminder_choices %}
+              <div class="form-check">
+                <input type="checkbox" name="reminder_days" value="{{ days }}" id="offerRem{{ days }}"
+                       class="form-check-input offer-reminder-choice">
+                <label class="form-check-label" for="offerRem{{ days }}">{{ days }} day{{ 's' if days != 1 }}</label>
+              </div>
+              {% endfor %}
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" id="offerDeleteBtn" class="btn btn-outline-danger btn-sm me-auto" style="display:none;">
+            <i class="bi bi-trash me-1"></i>Delete
+          </button>
+          <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-primary btn-sm">Save</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+{# Delete confirmation (opened from the edit modal's Delete button) #}
+<div class="modal fade" id="offerDeleteModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-sm modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h6 class="modal-title text-danger">Delete offer</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">Delete <strong id="offerDeleteName"></strong>? This can't be undone.</div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+        <form method="post" id="offerDeleteForm">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button class="btn btn-danger btn-sm">Delete</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function() {
+  var modalEl = document.getElementById('offerModal');
+  if (!modalEl) return;
+  var form       = document.getElementById('offerForm');
+  var title      = document.getElementById('offerModalTitle');
+  var deleteBtn  = document.getElementById('offerDeleteBtn');
+  var delModalEl = document.getElementById('offerDeleteModal');
+  var dateInput  = document.getElementById('offerExpiration');
+  var hint       = document.getElementById('offerReminderHint');
+  var boxes      = modalEl.querySelectorAll('.offer-reminder-choice');
+
+  // Reminders only fire when there's an expiration date — gray the choices out
+  // (purely a UI cue; the server never fires reminders without a date).
+  function refreshReminders() {
+    var has = !!dateInput.value;
+    boxes.forEach(function(b) { b.disabled = !has; });
+    hint.textContent = has
+      ? 'Send a nudge this many days before the expiration date.'
+      : 'Add an expiration date above to enable reminders.';
+  }
+  dateInput.addEventListener('change', refreshReminders);
+
+  // Populate the shared modal from the clicked trigger each time it opens.
+  modalEl.addEventListener('show.bs.modal', function(ev) {
+    var d = (ev.relatedTarget && ev.relatedTarget.dataset) || {};
+    var isEdit = !!d.action;
+    form.setAttribute('action', d.action || form.dataset.newAction);
+    title.textContent = isEdit ? 'Edit offer' : 'Add an offer';
+    form.elements['name'].value            = d.name || '';
+    form.elements['description'].value     = d.description || '';
+    form.elements['amount'].value          = d.amount || '';
+    form.elements['expiration_date'].value = d.expiration || '';
+    var picked = (d.reminders || '').split(',');
+    boxes.forEach(function(b) { b.checked = picked.indexOf(b.value) !== -1; });
+    deleteBtn.style.display = isEdit ? '' : 'none';
+    deleteBtn.dataset.deleteAction = d.deleteAction || '';
+    deleteBtn.dataset.name = d.name || '';
+    refreshReminders();
+  });
+
+  modalEl.addEventListener('shown.bs.modal', function() {
+    if (deleteBtn.style.display === 'none') form.elements['name'].focus();
+  });
+
+  // Delete: hand off to the confirmation modal once this one finishes closing
+  // (avoids two stacked backdrops).
+  deleteBtn.addEventListener('click', function() {
+    document.getElementById('offerDeleteForm').setAttribute('action', deleteBtn.dataset.deleteAction);
+    document.getElementById('offerDeleteName').textContent = deleteBtn.dataset.name;
+    modalEl.addEventListener('hidden.bs.modal', function handler() {
+      modalEl.removeEventListener('hidden.bs.modal', handler);
+      bootstrap.Modal.getOrCreateInstance(delModalEl).show();
+    });
+    bootstrap.Modal.getInstance(modalEl).hide();
+  });
+})();
+</script>
 {% endblock %}

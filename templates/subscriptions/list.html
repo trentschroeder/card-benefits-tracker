@@ -5,7 +5,9 @@
 
 <div class="d-flex justify-content-between align-items-center mb-3">
   <h2 class="mb-0"><i class="bi bi-arrow-repeat me-2"></i>Subscriptions</h2>
-  <a href="{{ url_for('subscription_new') }}" class="btn btn-primary btn-sm">
+  {# href is the no-JS fallback; with JS the data-bs-* attributes open the modal. #}
+  <a href="{{ url_for('subscription_new') }}" class="btn btn-primary btn-sm"
+     data-bs-toggle="modal" data-bs-target="#subModal">
     <i class="bi bi-plus-lg me-1"></i>Add Subscription
   </a>
 </div>
@@ -28,7 +30,7 @@
   </div>
 </div>
 
-{% if not groups and not inactive %}
+{% if not groups %}
 <div class="text-center py-5 text-muted">
   <i class="bi bi-arrow-repeat display-4 mb-3 d-block"></i>
   No subscriptions yet. <a href="{{ url_for('subscription_new') }}">Add one</a> to start tracking
@@ -39,7 +41,13 @@
 {% macro sub_row(s) %}
 <div class="benefit-row">
   <span class="row-dot" style="background:#3da5ff;"></span>
-  <a href="{{ url_for('subscription_edit', id=s.id) }}" class="row-name" style="text-decoration:none;color:inherit;">
+  <a href="{{ url_for('subscription_edit', id=s.id) }}" class="row-name" style="text-decoration:none;color:inherit;"
+     data-bs-toggle="modal" data-bs-target="#subModal"
+     data-action="{{ url_for('subscription_edit', id=s.id) }}"
+     data-delete-action="{{ url_for('subscription_delete', id=s.id) }}"
+     data-name="{{ s.name }}" data-amount="{{ '%.2f' | format(s.amount) }}"
+     data-category="{{ s.category or '' }}" data-description="{{ s.description or '' }}"
+     data-card="{{ s.user_card_id or '' }}" data-inactive="{{ 0 if s.active else 1 }}">
     {{ s.name }}
     {% if s.description %}
       <i class="bi bi-info-circle row-info-icon ms-1" data-bs-toggle="tooltip" title="{{ s.description }}"></i>
@@ -57,8 +65,10 @@
 </div>
 {% endmacro %}
 
-{# Category sections #}
+{# Category sections — active subs shown, inactive ones collapsed under the
+   same category, mirroring how ignored benefits sit under their card. #}
 {% for grp in groups %}
+{% set gi = loop.index %}
 <div class="card-section mb-4">
   <div class="card-section-header">
     <div class="card-section-icon"><i class="bi {{ grp.icon }}"></i></div>
@@ -69,40 +79,176 @@
   </div>
   <div class="card-section-body">
     <div class="benefit-list">
-      {% for s in grp.subs %}{{ sub_row(s) }}{% endfor %}
+      {% for s in grp.active %}{{ sub_row(s) }}{% endfor %}
+      {% if not grp.active %}
+      <div class="benefit-row benefit-row-msg text-muted" style="font-size:.82rem;">
+        <i class="bi bi-pause-circle me-2"></i>No active subscriptions in this category
+      </div>
+      {% endif %}
+
+      {# Inactive in this category (collapsed) #}
+      {% if grp.inactive %}
+      <div class="done-footer" data-bs-toggle="collapse" data-bs-target="#inactive-{{ gi }}"
+           role="button" aria-expanded="false" aria-controls="inactive-{{ gi }}">
+        <i class="bi bi-chevron-right chev" style="font-size:.65rem;"></i>
+        <span><i class="bi bi-pause-circle me-1"></i>{{ grp.inactive | length }} inactive</span>
+      </div>
+      <div class="collapse" id="inactive-{{ gi }}">
+        {% for s in grp.inactive %}
+        <div class="benefit-row done-row">
+          <span class="row-dot" style="background:#7e8aa0;"></span>
+          <a href="{{ url_for('subscription_edit', id=s.id) }}" class="row-name text-muted fw-normal" style="text-decoration:none;color:inherit;"
+             data-bs-toggle="modal" data-bs-target="#subModal"
+             data-action="{{ url_for('subscription_edit', id=s.id) }}"
+             data-delete-action="{{ url_for('subscription_delete', id=s.id) }}"
+             data-name="{{ s.name }}" data-amount="{{ '%.2f' | format(s.amount) }}"
+             data-category="{{ s.category or '' }}" data-description="{{ s.description or '' }}"
+             data-card="{{ s.user_card_id or '' }}" data-inactive="1">{{ s.name }}</a>
+          <span class="row-period">Monthly</span>
+          <div class="row-bar-wrap"></div>
+          <span class="row-amount text-muted">${{ '%.2f' | format(s.amount) }}</span>
+          <div class="row-action">
+            <form method="post" action="{{ url_for('subscription_toggle', id=s.id) }}" style="margin:0;">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button type="submit" class="btn btn-link btn-sm p-0" title="Resume"><i class="bi bi-play"></i></button>
+            </form>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
     </div>
   </div>
 </div>
 {% endfor %}
 
-{# Inactive (collapsed) #}
-{% if inactive %}
-<div class="card-section mb-4">
-  <div class="done-footer" data-bs-toggle="collapse" data-bs-target="#inactiveSubs"
-       role="button" aria-expanded="false" aria-controls="inactiveSubs">
-    <i class="bi bi-chevron-right chev" style="font-size:.65rem;"></i>
-    <span><i class="bi bi-pause-circle me-1"></i>{{ inactive_count }} inactive</span>
-  </div>
-  <div class="collapse" id="inactiveSubs">
-    <div class="benefit-list">
-      {% for s in inactive %}
-      <div class="benefit-row done-row">
-        <span class="row-dot" style="background:#7e8aa0;"></span>
-        <a href="{{ url_for('subscription_edit', id=s.id) }}" class="row-name text-muted fw-normal" style="text-decoration:none;color:inherit;">{{ s.name }}</a>
-        <span class="row-period">Monthly</span>
-        <div class="row-bar-wrap"></div>
-        <span class="row-amount text-muted">${{ '%.2f' | format(s.amount) }}</span>
-        <div class="row-action">
-          <form method="post" action="{{ url_for('subscription_toggle', id=s.id) }}" style="margin:0;">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <button type="submit" class="btn btn-link btn-sm p-0" title="Resume"><i class="bi bi-play"></i></button>
-          </form>
-        </div>
+{# ── Reusable Add/Edit modal — populated by JS from the trigger's data-* ── #}
+<div class="modal fade" id="subModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h6 class="modal-title" id="subModalTitle">Add a subscription</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
       </div>
-      {% endfor %}
+      <form method="post" id="subForm"
+            action="{{ url_for('subscription_new') }}"
+            data-new-action="{{ url_for('subscription_new') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="modal-body">
+          <div class="mb-3">
+            <label class="form-label">Name <span class="text-danger">*</span></label>
+            <input name="name" type="text" class="form-control" required autofocus
+                   placeholder="e.g. Netflix, Spotify, iCloud+">
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Monthly amount ($) <span class="text-danger">*</span></label>
+            <input name="amount" type="number" step="0.01" min="0" class="form-control"
+                   required placeholder="0.00">
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Category</label>
+            <select name="category" class="form-select">
+              <option value="">— Other —</option>
+              {% for cat in categories %}<option value="{{ cat }}">{{ cat }}</option>{% endfor %}
+            </select>
+            <div class="form-text">Groups this subscription on the Subscriptions page.</div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Description</label>
+            <input name="description" type="text" class="form-control"
+                   placeholder="e.g. Family plan, shared with the kids">
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Paid with</label>
+            <select name="user_card_id" class="form-select">
+              <option value="">— Not specified —</option>
+              {% for c in wallet_cards %}<option value="{{ c.id }}">{{ c.label }}</option>{% endfor %}
+            </select>
+            <div class="form-text">Optionally tie this to a card in your wallet.</div>
+          </div>
+          <div class="form-check form-switch">
+            <input name="inactive" type="checkbox" class="form-check-input" role="switch" id="subInactiveSwitch">
+            <label class="form-check-label" for="subInactiveSwitch">Inactive (cancelled or paused)</label>
+            <div class="form-text">Inactive subs still show in the list, but don't add to your monthly total.</div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" id="subDeleteBtn" class="btn btn-outline-danger btn-sm me-auto" style="display:none;">
+            <i class="bi bi-trash me-1"></i>Delete
+          </button>
+          <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-primary btn-sm">Save</button>
+        </div>
+      </form>
     </div>
   </div>
 </div>
-{% endif %}
 
+{# Delete confirmation (opened from the edit modal's Delete button) #}
+<div class="modal fade" id="subDeleteModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-sm modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h6 class="modal-title text-danger">Delete subscription</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">Delete <strong id="subDeleteName"></strong>? This can't be undone.</div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+        <form method="post" id="subDeleteForm">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button class="btn btn-danger btn-sm">Delete</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function() {
+  var modalEl = document.getElementById('subModal');
+  if (!modalEl) return;
+  var form      = document.getElementById('subForm');
+  var title     = document.getElementById('subModalTitle');
+  var deleteBtn = document.getElementById('subDeleteBtn');
+  var delModalEl = document.getElementById('subDeleteModal');
+
+  // Populate the shared modal from the clicked trigger each time it opens.
+  modalEl.addEventListener('show.bs.modal', function(ev) {
+    var d = (ev.relatedTarget && ev.relatedTarget.dataset) || {};
+    var isEdit = !!d.action;
+    form.setAttribute('action', d.action || form.dataset.newAction);
+    title.textContent = isEdit ? 'Edit subscription' : 'Add a subscription';
+    form.elements['name'].value         = d.name || '';
+    form.elements['amount'].value       = d.amount || '';
+    form.elements['category'].value     = d.category || '';
+    form.elements['description'].value  = d.description || '';
+    form.elements['user_card_id'].value = d.card || '';
+    form.elements['inactive'].checked   = d.inactive === '1';
+    deleteBtn.style.display = isEdit ? '' : 'none';
+    deleteBtn.dataset.deleteAction = d.deleteAction || '';
+    deleteBtn.dataset.name = d.name || '';
+  });
+
+  // Focus the name field when adding (edit keeps native focus behaviour).
+  modalEl.addEventListener('shown.bs.modal', function() {
+    if (deleteBtn.style.display === 'none') form.elements['name'].focus();
+  });
+
+  // Delete: hand off to the confirmation modal once this one finishes closing
+  // (avoids two stacked backdrops).
+  deleteBtn.addEventListener('click', function() {
+    document.getElementById('subDeleteForm').setAttribute('action', deleteBtn.dataset.deleteAction);
+    document.getElementById('subDeleteName').textContent = deleteBtn.dataset.name;
+    modalEl.addEventListener('hidden.bs.modal', function handler() {
+      modalEl.removeEventListener('hidden.bs.modal', handler);
+      bootstrap.Modal.getOrCreateInstance(delModalEl).show();
+    });
+    bootstrap.Modal.getInstance(modalEl).hide();
+  });
+})();
+</script>
 {% endblock %}

@@ -3131,7 +3131,8 @@ def send_test_subscription_digest():
         flash('You have no active subscriptions to summarize.', 'info')
         return redirect(url_for('subscriptions_list'))
     try:
-        send_subscription_digest_email(gmail_user, gmail_pass, recipient, subs, total)
+        groups = _subscription_digest_groups(subs)
+        send_subscription_digest_email(gmail_user, gmail_pass, recipient, groups, total)
         flash(f'Subscriptions summary sent to {recipient} — {len(subs)} active, ${total:,.2f}/mo.', 'success')
     except Exception as e:
         flash(f'Failed to send email: {e}', 'danger')
@@ -3198,7 +3199,9 @@ def offers_list():
         (*ids,)).fetchall()
     offers = [enrich_offer(db, r, today) for r in rows]
     db.close()
-    return render_template('offers/list.html', offers=offers)
+    return render_template('offers/list.html', offers=offers,
+                           offer_reminder_choices=_OFFER_REMINDER_DAY_CHOICES,
+                           default_reminder_days=_OFFER_DEFAULT_REMINDER_DAYS)
 
 
 @app.route('/offers/new', methods=['GET', 'POST'])
@@ -3434,25 +3437,32 @@ def subscriptions_list():
     inactive = [r for r in rows if not r['active']]
     monthly_total = sum(r['amount'] for r in active)
 
-    # Group active subs into category sections (defined order, then Other).
+    # Group subs into category sections (defined order, then Other), keeping
+    # active and inactive together under the same category. Inactive ones are
+    # collapsed in the template, mirroring how ignored benefits sit under a card.
+    # The subtotal reflects active spend only. A section shows if it has any sub.
     buckets = {}
-    for s in active:
-        buckets.setdefault(_normalize_category(s['category']), []).append(s)
+    for s in rows:
+        b = buckets.setdefault(_normalize_category(s['category']), {'active': [], 'inactive': []})
+        b['active' if s['active'] else 'inactive'].append(s)
     groups = []
     for cat in _SUBSCRIPTION_CATEGORIES + ['Other']:
-        subs = buckets.get(cat)
-        if subs:
+        b = buckets.get(cat)
+        if b:
             groups.append({
                 'name': cat,
                 'icon': _SUBSCRIPTION_CATEGORY_ICONS.get(cat, 'bi-tag'),
-                'subs': subs,
-                'subtotal': sum(s['amount'] for s in subs),
+                'active': b['active'],
+                'inactive': b['inactive'],
+                'subtotal': sum(s['amount'] for s in b['active']),
             })
+    cards = _wallet_cards_for(db, uid)
     db.close()
     return render_template('subscriptions/list.html',
-                           groups=groups, inactive=inactive,
+                           groups=groups,
                            active_count=len(active), inactive_count=len(inactive),
-                           monthly_total=monthly_total)
+                           monthly_total=monthly_total,
+                           wallet_cards=cards, categories=_SUBSCRIPTION_CATEGORIES)
 
 
 @app.route('/subscriptions/new', methods=['GET', 'POST'])
@@ -3674,20 +3684,38 @@ def _run_reminder_check(force=False):
 
 def _active_subscriptions_for(db, uid):
     """Active subscriptions in the user's shared wallet (their own + a linked
-    partner's), as ([{name, amount, card_label}], monthly_total)."""
+    partner's), as ([{name, amount, card_label, category}], monthly_total)."""
     ids = linked_user_ids(db, uid)
     ph  = ','.join('?' * len(ids))
     rows = db.execute(f'''
-        SELECT s.name, s.amount, COALESCE(uc.nickname, c.name) AS card_label
+        SELECT s.name, s.amount, s.category, COALESCE(uc.nickname, c.name) AS card_label
         FROM subscriptions s
         LEFT JOIN user_cards uc ON uc.id = s.user_card_id
         LEFT JOIN cards c       ON c.id = uc.card_id
         WHERE s.user_id IN ({ph}) AND s.active = 1
         ORDER BY s.amount DESC, s.name
     ''', (*ids,)).fetchall()
-    subs  = [{'name': r['name'], 'amount': r['amount'], 'card_label': r['card_label']} for r in rows]
+    subs  = [{'name': r['name'], 'amount': r['amount'], 'card_label': r['card_label'],
+              'category': r['category']} for r in rows]
     total = sum(r['amount'] for r in rows)
     return subs, total
+
+
+def _subscription_digest_groups(subs):
+    """Order `subs` (each a dict with a 'category' key) into category sections
+    matching the Subscriptions page: the defined categories first, then 'Other'.
+    Empty categories are dropped. Returns [{name, subtotal, subs}]."""
+    buckets = {}
+    for s in subs:
+        buckets.setdefault(_normalize_category(s.get('category')), []).append(s)
+    groups = []
+    for cat in _SUBSCRIPTION_CATEGORIES + ['Other']:
+        bucket = buckets.get(cat)
+        if bucket:
+            groups.append({'name': cat,
+                           'subtotal': sum(s['amount'] for s in bucket),
+                           'subs': bucket})
+    return groups
 
 
 def _run_subscription_digest(force=False):
@@ -3718,7 +3746,8 @@ def _run_subscription_digest(force=False):
         if not subs:
             continue
         try:
-            send_subscription_digest_email(gmail_user, gmail_pass, recipient, subs, total)
+            groups = _subscription_digest_groups(subs)
+            send_subscription_digest_email(gmail_user, gmail_pass, recipient, groups, total)
             db.execute(
                 'INSERT OR IGNORE INTO subscription_digest_sends (recipient_user_id, period_ym) VALUES (?, ?)',
                 (uid, period_ym))

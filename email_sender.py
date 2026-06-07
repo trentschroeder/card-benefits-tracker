@@ -322,23 +322,35 @@ def send_card_request_email(gmail_user, gmail_app_password, recipients,
         server.sendmail(gmail_user, recipients, msg.as_string())
 
 
-def send_subscription_digest_email(gmail_user, gmail_app_password, recipient, subs, monthly_total):
+def send_subscription_digest_email(gmail_user, gmail_app_password, recipient, groups, monthly_total):
     """Monthly awareness digest: every active subscription and what it costs per
-    month. `subs` is a list of dicts with keys: name, amount, card_label (or None).
+    month, grouped into category sections to match the Subscriptions page.
+    `groups` is an ordered list of dicts with keys: name, subtotal, subs — where
+    each sub is a dict with keys name, amount, card_label (or None).
     No-op when there are no active subscriptions."""
-    if not subs:
+    if not groups:
         return
 
-    n = len(subs)
+    n = sum(len(g['subs']) for g in groups)
     font = "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif"
     yearly = monthly_total * 12
     subject = f"Your subscriptions: ${monthly_total:,.2f}/mo across {n} active"
 
-    rows = ""
-    for s in subs:
-        sub_line = (f'<div style="font:400 12px {font};color:#8a93a6;margin-top:2px;">{escape(s["card_label"])}</div>'
-                    if s.get("card_label") else "")
-        rows += f"""
+    sections = ""
+    for g in groups:
+        sections += f"""
+        <tr>
+          <td colspan="2" style="padding:18px 0 4px;">
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+              <td style="font:700 12px {font};color:#1a3c8a;letter-spacing:.05em;text-transform:uppercase;">{escape(g['name'])}</td>
+              <td align="right" style="font:600 12px {font};color:#8a93a6;white-space:nowrap;">${g['subtotal']:,.2f}/mo</td>
+            </tr></table>
+          </td>
+        </tr>"""
+        for s in g['subs']:
+            sub_line = (f'<div style="font:400 12px {font};color:#8a93a6;margin-top:2px;">{escape(s["card_label"])}</div>'
+                        if s.get("card_label") else "")
+            sections += f"""
         <tr>
           <td style="padding:11px 0;border-top:1px solid #eef1f6;">
             <div style="font:600 15px {font};color:#1a2233;">{escape(s['name'])}</div>
@@ -370,7 +382,7 @@ def send_subscription_digest_email(gmail_user, gmail_app_password, recipient, su
           </div>
         </td></tr>
         <tr><td style="padding:6px 24px 0;">
-          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">{rows}</table>
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">{sections}</table>
         </td></tr>
         <tr><td style="padding:16px 24px 4px;">
           <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
