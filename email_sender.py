@@ -269,7 +269,7 @@ def send_reminder_email(gmail_user, gmail_app_password, recipient, benefits_due,
         {offers_row}
         <tr><td style="padding:4px 24px 26px;">
           <div style="border-top:1px solid #eef1f6;padding-top:16px;font:400 12px {font};color:#98a2b3;line-height:1.6;">
-            Sent by <a href="https://cardbenefits.trentschroeder.com" style="color:#1a3c8a;text-decoration:none;">Dimes</a>.
+            Sent by <a href="https://dimes.trentschroeder.com" style="color:#1a3c8a;text-decoration:none;">Dimes</a>.
             {footer_note}
           </div>
         </td></tr>

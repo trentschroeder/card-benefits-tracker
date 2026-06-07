@@ -116,7 +116,7 @@ def _csrf_protect():
 # at another user's card. Clicking lands on a confirm page (a GET never mutates,
 # so mail-client link prefetch can't create phantom redemptions); the confirm
 # POST is CSRF-protected like every other form.
-APP_BASE_URL = 'https://cardbenefits.trentschroeder.com'
+APP_BASE_URL = 'https://dimes.trentschroeder.com'
 REDEEM_TOKEN_MAX_AGE = 120 * 24 * 3600  # 120 days — covers the longest (annual) reminder lead
 
 
