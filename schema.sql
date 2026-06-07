@@ -247,6 +247,7 @@ CREATE TABLE IF NOT EXISTS subscriptions (
     name          TEXT    NOT NULL,
     description   TEXT,
     amount        REAL    NOT NULL,          -- monthly cost
+    category      TEXT,                       -- e.g. Streaming/Shopping/Pets/Health; NULL = Other
     user_card_id  INTEGER,                   -- optional: which wallet card pays for it
     active        INTEGER NOT NULL DEFAULT 1, -- 0 = cancelled/paused, kept for the inactive count
     created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,

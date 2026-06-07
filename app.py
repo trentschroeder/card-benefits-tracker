@@ -229,6 +229,11 @@ def init_db():
         db.commit()
     except Exception:
         pass
+    try:
+        db.execute('ALTER TABLE subscriptions ADD COLUMN category TEXT')
+        db.commit()
+    except Exception:
+        pass
     # Phase 9a: card sharing — user_cards gets a nullable share_group_id pointing
     # at card_share_groups (created by executescript above). NULL = solo card.
     try:
@@ -3341,6 +3346,23 @@ def offer_delete(id):
 
 # ── Subscriptions ───────────────────────────────────────────────────────────────
 
+# Fixed category set (extend here to add more). Subs with no/unknown category
+# are grouped under "Other". Icons are Bootstrap Icon names for the section header.
+_SUBSCRIPTION_CATEGORIES = ['Streaming', 'Shopping', 'Pets', 'Health']
+_SUBSCRIPTION_CATEGORY_ICONS = {
+    'Streaming': 'bi-film',
+    'Shopping':  'bi-bag',
+    'Pets':      'bi-heart',
+    'Health':    'bi-capsule',
+    'Other':     'bi-tag',
+}
+
+
+def _normalize_category(cat):
+    """Map a stored category to a known one, else 'Other'."""
+    return cat if cat in _SUBSCRIPTION_CATEGORIES else 'Other'
+
+
 def _wallet_cards_for(db, uid):
     """Active cards in the shared wallet, as [{id, label}] for the payment-card
     picker. Label is the per-instance nickname or the catalog card name."""
@@ -3361,6 +3383,8 @@ def _read_subscription_form(form, db, uid):
     description = form.get('description', '').strip() or None
     amount_raw  = form.get('amount', '').strip()
     card_raw    = form.get('user_card_id', '').strip()
+    cat_raw     = form.get('category', '').strip()
+    category    = cat_raw if cat_raw in _SUBSCRIPTION_CATEGORIES else None
     active      = 0 if form.get('inactive') else 1
 
     if not name:
@@ -3386,7 +3410,7 @@ def _read_subscription_form(form, db, uid):
 
     return {
         'name': name, 'description': description, 'amount': amount,
-        'user_card_id': user_card_id, 'active': active,
+        'category': category, 'user_card_id': user_card_id, 'active': active,
     }, None
 
 
@@ -3408,9 +3432,24 @@ def subscriptions_list():
     active   = [r for r in rows if r['active']]
     inactive = [r for r in rows if not r['active']]
     monthly_total = sum(r['amount'] for r in active)
+
+    # Group active subs into category sections (defined order, then Other).
+    buckets = {}
+    for s in active:
+        buckets.setdefault(_normalize_category(s['category']), []).append(s)
+    groups = []
+    for cat in _SUBSCRIPTION_CATEGORIES + ['Other']:
+        subs = buckets.get(cat)
+        if subs:
+            groups.append({
+                'name': cat,
+                'icon': _SUBSCRIPTION_CATEGORY_ICONS.get(cat, 'bi-tag'),
+                'subs': subs,
+                'subtotal': sum(s['amount'] for s in subs),
+            })
     db.close()
     return render_template('subscriptions/list.html',
-                           active=active, inactive=inactive,
+                           groups=groups, inactive=inactive,
                            active_count=len(active), inactive_count=len(inactive),
                            monthly_total=monthly_total)
 
@@ -3427,12 +3466,13 @@ def subscription_new():
             db.close()
             flash(err, 'danger')
             return render_template('subscriptions/form.html', subscription=None,
-                                   form=request.form, wallet_cards=cards)
+                                   form=request.form, wallet_cards=cards,
+                                   categories=_SUBSCRIPTION_CATEGORIES)
         db.execute(
-            'INSERT INTO subscriptions (user_id, name, description, amount, user_card_id, active) '
-            'VALUES (?, ?, ?, ?, ?, ?)',
+            'INSERT INTO subscriptions (user_id, name, description, amount, category, user_card_id, active) '
+            'VALUES (?, ?, ?, ?, ?, ?, ?)',
             (uid, values['name'], values['description'], values['amount'],
-             values['user_card_id'], values['active']))
+             values['category'], values['user_card_id'], values['active']))
         db.commit()
         db.close()
         flash(f'Subscription "{values["name"]}" added.', 'success')
@@ -3440,7 +3480,8 @@ def subscription_new():
 
     cards = _wallet_cards_for(db, uid)
     db.close()
-    return render_template('subscriptions/form.html', subscription=None, form={}, wallet_cards=cards)
+    return render_template('subscriptions/form.html', subscription=None, form={},
+                           wallet_cards=cards, categories=_SUBSCRIPTION_CATEGORIES)
 
 
 @app.route('/subscriptions/<int:id>/edit', methods=['GET', 'POST'])
@@ -3464,11 +3505,12 @@ def subscription_edit(id):
             db.close()
             flash(err, 'danger')
             return render_template('subscriptions/form.html', subscription=sub,
-                                   form=request.form, wallet_cards=cards)
+                                   form=request.form, wallet_cards=cards,
+                                   categories=_SUBSCRIPTION_CATEGORIES)
         db.execute(
-            'UPDATE subscriptions SET name=?, description=?, amount=?, user_card_id=?, active=? WHERE id=?',
+            'UPDATE subscriptions SET name=?, description=?, amount=?, category=?, user_card_id=?, active=? WHERE id=?',
             (values['name'], values['description'], values['amount'],
-             values['user_card_id'], values['active'], id))
+             values['category'], values['user_card_id'], values['active'], id))
         db.commit()
         db.close()
         flash(f'Subscription "{values["name"]}" updated.', 'success')
@@ -3477,7 +3519,8 @@ def subscription_edit(id):
     cards = _wallet_cards_for(db, uid)
     db.close()
     return render_template('subscriptions/form.html', subscription=sub,
-                           form=dict(sub), wallet_cards=cards)
+                           form=dict(sub), wallet_cards=cards,
+                           categories=_SUBSCRIPTION_CATEGORIES)
 
 
 @app.route('/subscriptions/<int:id>/toggle', methods=['POST'])

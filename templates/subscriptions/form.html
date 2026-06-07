@@ -30,6 +30,18 @@
     </div>
 
     <div class="mb-3">
+      <label class="form-label">Category</label>
+      <select name="category" class="form-select">
+        {% set selcat = form.get('category') %}
+        <option value="">— Other —</option>
+        {% for cat in categories %}
+          <option value="{{ cat }}" {% if selcat == cat %}selected{% endif %}>{{ cat }}</option>
+        {% endfor %}
+      </select>
+      <div class="form-text">Groups this subscription on the Subscriptions page.</div>
+    </div>
+
+    <div class="mb-3">
       <label class="form-label">Description</label>
       <input name="description" type="text" class="form-control"
              value="{{ form.get('description', '') or '' }}"
