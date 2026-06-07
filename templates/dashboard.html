@@ -361,10 +361,6 @@
 
 {% block scripts %}
 <script>
-  document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => {
-    new bootstrap.Tooltip(el, { trigger: 'hover focus' });
-  });
-
   function toggleDone(id) {
     var el  = document.getElementById(id);
     var cid = id.replace('done-', '');

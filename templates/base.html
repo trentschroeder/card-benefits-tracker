@@ -953,6 +953,11 @@
     new bootstrap.Toast(el).show();
   });
 
+  // Initialize Bootstrap tooltips app-wide (any element with data-bs-toggle="tooltip").
+  document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(function(el) {
+    new bootstrap.Tooltip(el, { trigger: 'hover focus' });
+  });
+
   // ── Add-to-Home-Screen hint ──────────────────────────────────────────────
   (function() {
     var hint = document.getElementById('a2hs-hint');
