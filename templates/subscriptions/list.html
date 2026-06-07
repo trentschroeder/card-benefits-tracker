@@ -1,5 +1,6 @@
 {% extends 'base.html' %}
 {% block title %}Subscriptions — Dimes{% endblock %}
+{% block head %}{% include '_list_cards.css.html' %}{% endblock %}
 {% block content %}
 
 <div class="d-flex justify-content-between align-items-center mb-3">
@@ -33,80 +34,62 @@
   No subscriptions yet. <a href="{{ url_for('subscription_new') }}">Add one</a> to start tracking
   what you pay each month.
 </div>
-{% endif %}
+{% else %}
+<div class="card-section mb-4">
+  <div class="benefit-list">
+    {% if not active %}
+      <div class="benefit-row benefit-row-msg text-muted" style="font-size:.82rem;">
+        <i class="bi bi-pause-circle me-2"></i>No active subscriptions
+      </div>
+    {% endif %}
 
-{% macro sub_card(s) %}
-<div class="card mb-3 mod-card{% if not s.active %} is-muted{% endif %}">
-  <div class="mod-row">
-    <div class="mod-info">
-      <div class="mod-lead">
-        <div class="mod-icon"><i class="bi bi-arrow-repeat"></i></div>
-        <div class="mod-headwrap">
-          <div>
-            <span class="mod-name">{{ s.name }}</span>
-            {% if not s.active %}<span class="mod-pill pill-muted">Inactive</span>{% endif %}
-          </div>
-          {% if s.description %}<div class="mod-desc">{{ s.description }}</div>{% endif %}
+    {% for s in active %}
+      <div class="benefit-row">
+        <span class="row-dot" style="background:#3da5ff;"></span>
+        <a href="{{ url_for('subscription_edit', id=s.id) }}" class="row-name" style="text-decoration:none;color:inherit;">
+          {{ s.name }}
+          {% if s.description %}
+            <i class="bi bi-info-circle row-info-icon ms-1" data-bs-toggle="tooltip" title="{{ s.description }}"></i>
+          {% endif %}
+        </a>
+        <span class="row-period">Monthly</span>
+        <div class="row-bar-wrap"></div>
+        <span class="row-amount remaining">${{ '%.2f' | format(s.amount) }}</span>
+        <div class="row-action">
+          <form method="post" action="{{ url_for('subscription_toggle', id=s.id) }}" style="margin:0;">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button class="btn-add" title="Pause"><i class="bi bi-pause"></i></button>
+          </form>
         </div>
       </div>
+    {% endfor %}
 
-      <div class="mod-metric-line">
-        <span class="mod-metric">${{ '%.2f' | format(s.amount) }}</span>
-        <span class="mod-metric-sub">/ month</span>
-      </div>
-
-      {% if s.card_label %}
-      <div class="mod-chips">
-        <span class="mod-chip"><i class="bi bi-credit-card"></i>{{ s.card_label }}</span>
-      </div>
-      {% endif %}
+    {% if inactive %}
+    <div class="done-footer" data-bs-toggle="collapse" data-bs-target="#inactiveSubs"
+         role="button" aria-expanded="false" aria-controls="inactiveSubs">
+      <i class="bi bi-chevron-right chev" style="font-size:.65rem;"></i>
+      <span><i class="bi bi-pause-circle me-1"></i>{{ inactive_count }} inactive</span>
     </div>
-
-    <div class="mod-actions">
-      <form method="post" action="{{ url_for('subscription_toggle', id=s.id) }}" class="mod-primary">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <button class="btn btn-outline-secondary btn-sm">
-          {% if s.active %}<i class="bi bi-pause-circle me-1"></i>Pause{% else %}<i class="bi bi-play-circle me-1"></i>Resume{% endif %}
-        </button>
-      </form>
-      <div class="mod-actions-secondary">
-        <a href="{{ url_for('subscription_edit', id=s.id) }}" class="btn btn-outline-secondary btn-sm" title="Edit" aria-label="Edit subscription">
-          <i class="bi bi-pencil"></i>
-        </a>
-        <button type="button" class="btn btn-outline-danger btn-sm" title="Delete" aria-label="Delete subscription"
-                data-bs-toggle="modal" data-bs-target="#deleteSubModal{{ s.id }}">
-          <i class="bi bi-trash"></i>
-        </button>
+    <div class="collapse done-section" id="inactiveSubs">
+      {% for s in inactive %}
+      <div class="benefit-row done-row">
+        <span class="row-dot" style="background:#7e8aa0;"></span>
+        <a href="{{ url_for('subscription_edit', id=s.id) }}" class="row-name text-muted fw-normal" style="text-decoration:none;color:inherit;">{{ s.name }}</a>
+        <span class="row-period">Monthly</span>
+        <div class="row-bar-wrap"></div>
+        <span class="row-amount text-muted">${{ '%.2f' | format(s.amount) }}</span>
+        <div class="row-action">
+          <form method="post" action="{{ url_for('subscription_toggle', id=s.id) }}" style="margin:0;">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-link btn-sm p-0" title="Resume"><i class="bi bi-play"></i></button>
+          </form>
+        </div>
       </div>
+      {% endfor %}
     </div>
+    {% endif %}
   </div>
 </div>
-
-<div class="modal fade" id="deleteSubModal{{ s.id }}" tabindex="-1">
-  <div class="modal-dialog modal-sm modal-dialog-centered">
-    <div class="modal-content">
-      <div class="modal-header">
-        <h6 class="modal-title text-danger">Delete subscription</h6>
-        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-      </div>
-      <div class="modal-body">Delete <strong>{{ s.name }}</strong>? This can't be undone.</div>
-      <div class="modal-footer">
-        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
-        <form method="post" action="{{ url_for('subscription_delete', id=s.id) }}">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-          <button class="btn btn-danger btn-sm">Delete</button>
-        </form>
-      </div>
-    </div>
-  </div>
-</div>
-{% endmacro %}
-
-{% for s in active %}{{ sub_card(s) }}{% endfor %}
-
-{% if inactive %}
-<h6 class="text-muted mt-4 mb-3"><i class="bi bi-pause-circle me-1"></i>Inactive ({{ inactive_count }})</h6>
-{% for s in inactive %}{{ sub_card(s) }}{% endfor %}
 {% endif %}
 
 {% endblock %}

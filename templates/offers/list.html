@@ -1,8 +1,9 @@
 {% extends 'base.html' %}
 {% block title %}Offers — Dimes{% endblock %}
+{% block head %}{% include '_list_cards.css.html' %}{% endblock %}
 {% block content %}
 
-<div class="d-flex justify-content-between align-items-center mb-4">
+<div class="d-flex justify-content-between align-items-center mb-3">
   <h2 class="mb-0"><i class="bi bi-tag-fill me-2"></i>Offers</h2>
   <a href="{{ url_for('offer_new') }}" class="btn btn-primary btn-sm">
     <i class="bi bi-plus-lg me-1"></i>Add Offer
@@ -15,76 +16,62 @@
   No offers yet. <a href="{{ url_for('offer_new') }}">Add one</a> to keep track of a
   gift card, coupon, or promotion.
 </div>
-{% endif %}
-
-{% for o in offers %}
-<div class="card mb-3 mod-card{% if o.expired %} is-muted{% endif %}">
-  <div class="mod-row">
-    <div class="mod-info">
-      <div class="mod-lead">
-        <div class="mod-icon">
-          <i class="bi {{ 'bi-gift' if o.amount is not none else 'bi-ticket-perforated' }}"></i>
-        </div>
-        <div class="mod-headwrap">
-          <div>
-            <span class="mod-name">{{ o.name }}</span>
-            {% if o.expiration_date and o.days_left is not none %}
-              {% if o.expired %}
-                <span class="mod-pill pill-danger">Expired</span>
-              {% elif o.days_left <= 3 %}
-                <span class="mod-pill pill-danger">{{ 'Today' if o.days_left <= 0 else o.days_left ~ 'd left' }}</span>
-              {% elif o.days_left <= 7 %}
-                <span class="mod-pill pill-warn">{{ o.days_left }}d left</span>
-              {% else %}
-                <span class="mod-pill pill-ok">{{ o.days_left }}d left</span>
-              {% endif %}
-            {% endif %}
-          </div>
-          {% if o.description %}<div class="mod-desc">{{ o.description }}</div>{% endif %}
-        </div>
-      </div>
-
-      {% if o.amount is not none %}
-        {% set rem_pct = 100 - o.pct_used %}
-        <div class="mod-metric-line">
-          <span class="mod-metric">${{ '%.2f' | format(o.remaining) }}</span>
-          <span class="mod-metric-sub">left of ${{ '%.2f' | format(o.amount) }}</span>
-        </div>
-        <div class="mod-bar">
-          <span style="width: {{ rem_pct }}%; background: {{ '#16a34a' if rem_pct >= 50 else ('#ea7317' if rem_pct >= 20 else '#dc2626') }};"></span>
-        </div>
+{% else %}
+<div class="card-section mb-4">
+  <div class="benefit-list">
+    {% for o in offers %}
+      {% if o.expired %}
+        {% set dot='#dc3545' %}{% set rowc='' %}{% set bcls='days-badge-high' %}{% set dotc='' %}
+      {% elif o.expiration_date and o.days_left is not none and o.days_left <= 3 %}
+        {% set dot='#dc3545' %}{% set rowc='row-urgent-high' %}{% set bcls='days-badge-high' %}{% set dotc='dot-high' %}
+      {% elif o.expiration_date and o.days_left is not none and o.days_left <= 7 %}
+        {% set dot='#e67e22' %}{% set rowc='row-urgent-med' %}{% set bcls='days-badge-med' %}{% set dotc='' %}
+      {% else %}
+        {% set dot='#7e8aa0' %}{% set rowc='' %}{% set bcls='days-badge-low' %}{% set dotc='' %}
       {% endif %}
+      <div class="benefit-row {{ rowc }}">
+        <span class="row-dot {{ dotc }}" style="background:{{ dot }};"></span>
 
-      {% if o.expiration_display or o.reminder_days %}
-      <div class="mod-chips">
-        {% if o.expiration_display %}
-          <span class="mod-chip"><i class="bi bi-calendar-event"></i>Expires {{ o.expiration_display }}</span>
-        {% endif %}
-        {% if o.reminder_days %}
-          <span class="mod-chip"><i class="bi bi-bell"></i>{{ o.reminder_days | join(', ') }}d before</span>
-        {% endif %}
-      </div>
-      {% endif %}
-    </div>
-
-    <div class="mod-actions">
-      <button type="button" class="btn btn-outline-primary btn-sm mod-primary" data-bs-toggle="modal" data-bs-target="#redeemModal{{ o.id }}">
-        <i class="bi bi-check2-circle me-1"></i>{{ 'Redeem' if o.amount is not none else 'Mark used' }}
-      </button>
-      <div class="mod-actions-secondary">
-        <a href="{{ url_for('offer_edit', id=o.id) }}" class="btn btn-outline-secondary btn-sm" title="Edit" aria-label="Edit offer">
-          <i class="bi bi-pencil"></i>
+        <a href="{{ url_for('offer_edit', id=o.id) }}" class="row-name" style="text-decoration:none;color:inherit;">
+          {{ o.name }}
+          {% if o.description %}
+            <i class="bi bi-info-circle row-info-icon ms-1" data-bs-toggle="tooltip" title="{{ o.description }}"></i>
+          {% endif %}
         </a>
-        <button type="button" class="btn btn-outline-danger btn-sm" title="Delete" aria-label="Delete offer"
-                data-bs-toggle="modal" data-bs-target="#deleteModal{{ o.id }}">
-          <i class="bi bi-trash"></i>
-        </button>
+
+        <span class="row-period">{{ 'Gift card' if o.amount is not none else 'Coupon' }}</span>
+
+        {% if o.amount is not none %}
+          {% set rem_pct = 100 - o.pct_used %}
+          <div class="row-bar-wrap">
+            <div class="progress">
+              <div class="progress-bar {{ 'bg-success' if rem_pct >= 50 else ('bg-warning' if rem_pct >= 20 else 'bg-danger') }}"
+                   style="width:{{ rem_pct }}%"></div>
+            </div>
+          </div>
+          <span class="row-amount remaining">${{ '%.0f' | format(o.remaining) }} left</span>
+        {% else %}
+          <div class="row-bar-wrap"></div>
+          <span class="row-amount text-muted">&mdash;</span>
+        {% endif %}
+
+        {% if o.expiration_date and o.days_left is not none %}
+          <span class="days-badge {{ bcls }}">{{ 'Expired' if o.expired else ('Today' if o.days_left <= 0 else o.days_left ~ ('d left' if o.days_left <= 7 else 'd')) }}</span>
+        {% endif %}
+
+        <div class="row-action">
+          <button class="btn-add" data-bs-toggle="modal" data-bs-target="#redeemModal{{ o.id }}" title="Redeem">
+            <i class="bi bi-check-lg"></i>
+          </button>
+        </div>
       </div>
-    </div>
+    {% endfor %}
   </div>
 </div>
+{% endif %}
 
-<!-- Redeem modal -->
+{# Redeem modals (triggered by each row's action button) #}
+{% for o in offers %}
 <div class="modal fade" id="redeemModal{{ o.id }}" tabindex="-1">
   <div class="modal-dialog modal-dialog-centered">
     <div class="modal-content">
@@ -121,26 +108,6 @@
           {% endif %}
         </div>
       </form>
-    </div>
-  </div>
-</div>
-
-<!-- Delete modal -->
-<div class="modal fade" id="deleteModal{{ o.id }}" tabindex="-1">
-  <div class="modal-dialog modal-sm modal-dialog-centered">
-    <div class="modal-content">
-      <div class="modal-header">
-        <h6 class="modal-title text-danger">Delete offer</h6>
-        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-      </div>
-      <div class="modal-body">Delete <strong>{{ o.name }}</strong>? This can't be undone.</div>
-      <div class="modal-footer">
-        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
-        <form method="post" action="{{ url_for('offer_delete', id=o.id) }}">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-          <button class="btn btn-danger btn-sm">Delete</button>
-        </form>
-      </div>
     </div>
   </div>
 </div>
