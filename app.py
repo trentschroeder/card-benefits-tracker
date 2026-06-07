@@ -3348,13 +3348,14 @@ def offer_delete(id):
 
 # Fixed category set (extend here to add more). Subs with no/unknown category
 # are grouped under "Other". Icons are Bootstrap Icon names for the section header.
-_SUBSCRIPTION_CATEGORIES = ['Streaming', 'Shopping', 'Pets', 'Health']
+_SUBSCRIPTION_CATEGORIES = ['Streaming', 'Software & Cloud', 'Shopping', 'Pets', 'Health']
 _SUBSCRIPTION_CATEGORY_ICONS = {
-    'Streaming': 'bi-film',
-    'Shopping':  'bi-bag',
-    'Pets':      'bi-heart',
-    'Health':    'bi-capsule',
-    'Other':     'bi-tag',
+    'Streaming':        'bi-film',
+    'Software & Cloud': 'bi-cloud',
+    'Shopping':         'bi-bag',
+    'Pets':             'bi-heart',
+    'Health':           'bi-capsule',
+    'Other':            'bi-tag',
 }
 
 
