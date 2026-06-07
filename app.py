@@ -1751,7 +1751,7 @@ def card_request():
     gmail_pass = get_setting(db, 'gmail_app_password')
     base = (get_setting(db, 'app_base_url', APP_BASE_URL) or APP_BASE_URL).rstrip('/')
     admins = [r['email'] for r in db.execute(
-        'SELECT COALESCE(notification_email, email) AS email FROM users WHERE is_admin = 1'
+        'SELECT email FROM users WHERE is_admin = 1'
     ).fetchall() if r['email']]
     db.close()
     if gmail_user and gmail_pass and admins:
@@ -2852,27 +2852,69 @@ def preferences():
     return redirect(url_for('settings'))
 
 
-@app.route('/preferences/password', methods=['POST'])
+@app.route('/preferences/account', methods=['POST'])
 @login_required
-def change_password():
-    current = request.form.get('current_password', '')
-    new     = request.form.get('new_password', '')
-    confirm = request.form.get('confirm_password', '')
+def account_update():
+    """Merged account section: change the account email and/or the password in
+    one place. The account email is also where reminders are sent (there's no
+    separate notification address). Any change requires the current password."""
+    current   = request.form.get('current_password', '')
+    new_email = request.form.get('email', '').strip()
+    new_pw    = request.form.get('new_password', '')
+    confirm   = request.form.get('confirm_password', '')
+
     if not check_password_hash(g.user['password_hash'], current):
         flash('Current password is incorrect.', 'danger')
         return redirect(url_for('settings'))
-    if len(new) < 8:
-        flash('New password must be at least 8 characters.', 'danger')
-        return redirect(url_for('settings'))
-    if new != confirm:
-        flash('New passwords do not match.', 'danger')
-        return redirect(url_for('settings'))
+
     db = get_db()
-    db.execute('UPDATE users SET password_hash = ? WHERE id = ?',
-               (generate_password_hash(new), g.user['id']))
-    db.commit()
+    changes = []
+
+    # Email change (optional). Column is UNIQUE COLLATE NOCASE, so the dup check
+    # and the IntegrityError guard are both case-insensitive.
+    if new_email and new_email.lower() != g.user['email'].lower():
+        if '@' not in new_email or ' ' in new_email:
+            db.close()
+            flash('Enter a valid email address.', 'danger')
+            return redirect(url_for('settings'))
+        if db.execute('SELECT 1 FROM users WHERE email = ? AND id != ?',
+                      (new_email, g.user['id'])).fetchone():
+            db.close()
+            flash('That email is already in use by another account.', 'danger')
+            return redirect(url_for('settings'))
+        changes.append('email')
+
+    # Password change (optional — only if either field is filled).
+    if new_pw or confirm:
+        if len(new_pw) < 8:
+            db.close()
+            flash('New password must be at least 8 characters.', 'danger')
+            return redirect(url_for('settings'))
+        if new_pw != confirm:
+            db.close()
+            flash('New passwords do not match.', 'danger')
+            return redirect(url_for('settings'))
+        changes.append('password')
+
+    if not changes:
+        db.close()
+        flash('No changes — enter a new email or password.', 'info')
+        return redirect(url_for('settings'))
+
+    try:
+        if 'email' in changes:
+            db.execute('UPDATE users SET email = ? WHERE id = ?', (new_email, g.user['id']))
+        if 'password' in changes:
+            db.execute('UPDATE users SET password_hash = ? WHERE id = ?',
+                       (generate_password_hash(new_pw), g.user['id']))
+        db.commit()
+    except sqlite3.IntegrityError:
+        db.rollback()
+        db.close()
+        flash('That email is already in use by another account.', 'danger')
+        return redirect(url_for('settings'))
     db.close()
-    flash('Password updated.', 'success')
+    flash('Updated your ' + ' and '.join(changes) + '.', 'success')
     return redirect(url_for('settings'))
 
 
@@ -2968,13 +3010,9 @@ def settings():
             flash('Sign-up settings saved.', 'success')
             return redirect(url_for('settings'))
 
-        # Per-user profile (every logged-in user)
-        notification_email = request.form.get('notification_email', '').strip() or None
-        db.execute('UPDATE users SET notification_email = ? WHERE id = ?',
-                   (notification_email, g.user['id']))
-        db.commit()
+        # No other recognised POST sections (account email/password live on the
+        # dedicated /preferences/account route).
         db.close()
-        flash('Preferences saved.', 'success')
         return redirect(url_for('settings'))
 
     cfg = {}
@@ -3010,7 +3048,7 @@ def send_test_reminder():
         return redirect(url_for('settings'))
 
     uid       = g.user['id']
-    recipient = g.user['notification_email'] or g.user['email']
+    recipient = g.user['email']
     test_recipient = request.form.get('test_recipient', '').strip() or None
     if test_recipient and g.user['is_admin']:
         recipient = test_recipient
@@ -3455,9 +3493,9 @@ def subscription_delete(id):
 def _run_reminder_check(force=False):
     """
     Iterate over every user with reminders_enabled = 1. For each, find their
-    active-benefits-due-today and email them at notification_email (falling
-    back to their login email). Returns the total count of benefits emailed
-    across all users. force=True bypasses the "already sent" dedup check.
+    active-benefits-due-today and email them at their account email. Returns the
+    total count of benefits emailed across all users. force=True bypasses the
+    "already sent" dedup check.
     """
     db = get_db()
     gmail_user = get_setting(db, 'gmail_user')
@@ -3469,7 +3507,7 @@ def _run_reminder_check(force=False):
     # Honour the per-user reminders_enabled flag: a user who has turned reminder
     # emails off gets neither benefit reminders nor offer reminders/footers.
     users = db.execute('''
-        SELECT id, email, notification_email
+        SELECT id, email
         FROM users
         WHERE reminders_enabled = 1
     ''').fetchall()
@@ -3479,7 +3517,7 @@ def _run_reminder_check(force=False):
 
     for user in users:
         uid       = user['id']
-        recipient = user['notification_email'] or user['email']
+        recipient = user['email']
         if not recipient:
             continue
 

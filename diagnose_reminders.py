@@ -36,12 +36,12 @@ def share_pool(db, user_card_id):
 def main():
     db = connect()
     users = db.execute('''
-        SELECT id, email, notification_email
+        SELECT id, email
         FROM users ORDER BY id
     ''').fetchall()
 
     for u in users:
-        recipient = u['notification_email'] or u['email']
+        recipient = u['email']
         print(f"\n=== user {u['id']}  {u['email']}  ->  {recipient} ===")
 
         cards = db.execute('''

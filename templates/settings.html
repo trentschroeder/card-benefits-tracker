@@ -12,27 +12,45 @@
 <div class="row g-4">
   <div class="col-lg-7">
 
-    <!-- Notification email (every user) -->
+    <!-- Account: email + password (every user) -->
     <div class="card p-4 mb-4">
-      <h5 class="mb-3"><i class="bi bi-envelope me-2"></i>Email Notifications</h5>
-      <form method="post">
+      <h5 class="mb-3"><i class="bi bi-person-gear me-2"></i>Account</h5>
+      <form method="post" action="{{ url_for('account_update') }}">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <input type="hidden" name="section" value="profile">
         <div class="mb-3">
-          <label class="form-label">Notification Email</label>
-          <input name="notification_email" type="email" class="form-control"
-                 value="{{ g.user.notification_email or '' }}"
-                 placeholder="{{ g.user.email }}">
+          <label class="form-label">Email address</label>
+          <input name="email" type="email" class="form-control"
+                 value="{{ g.user.email }}" required autocomplete="email">
           <div class="form-text">
-            Where your reminders and summaries are delivered. Leave blank to use
-            your login email (<strong>{{ g.user.email }}</strong>).
+            Used to sign in, and where all your reminders are sent. Reminder timing
+            is set per benefit from each benefit's page.
           </div>
         </div>
-        <div class="form-text mb-3">
-          <i class="bi bi-info-circle me-1"></i>Reminder timing is set per benefit from
-          each benefit's page — that's also where you ignore a benefit.
+
+        <hr class="my-3">
+
+        <p class="form-text mb-2"><i class="bi bi-shield-lock me-1"></i>Change password — optional, leave blank to keep your current one.</p>
+        <div class="mb-3">
+          <label class="form-label">New password</label>
+          <input name="new_password" type="password" class="form-control"
+                 autocomplete="new-password" minlength="8" placeholder="Leave blank to keep current">
+          <div class="form-text">At least 8 characters.</div>
         </div>
-        <button class="btn btn-primary">Save</button>
+        <div class="mb-3">
+          <label class="form-label">Confirm new password</label>
+          <input name="confirm_password" type="password" class="form-control"
+                 autocomplete="new-password" minlength="8" placeholder="Leave blank to keep current">
+        </div>
+
+        <hr class="my-3">
+
+        <div class="mb-3">
+          <label class="form-label">Current password <span class="text-danger">*</span></label>
+          <input name="current_password" type="password" class="form-control"
+                 autocomplete="current-password" required>
+          <div class="form-text">Required to save any change above.</div>
+        </div>
+        <button class="btn btn-primary">Save changes</button>
       </form>
     </div>
 
@@ -158,31 +176,6 @@
         <button class="btn btn-outline-primary">
           <i class="bi bi-bell me-1"></i>Send Test Reminder
         </button>
-      </form>
-    </div>
-
-    <!-- Change password (every user) -->
-    <div class="card p-4 mb-4">
-      <h5 class="mb-3"><i class="bi bi-shield-lock me-2"></i>Change Password</h5>
-      <form method="post" action="{{ url_for('change_password') }}">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <div class="mb-3">
-          <label class="form-label">Current password</label>
-          <input name="current_password" type="password" class="form-control"
-                 autocomplete="current-password" required>
-        </div>
-        <div class="mb-3">
-          <label class="form-label">New password</label>
-          <input name="new_password" type="password" class="form-control"
-                 autocomplete="new-password" required minlength="8">
-          <div class="form-text">At least 8 characters.</div>
-        </div>
-        <div class="mb-3">
-          <label class="form-label">Confirm new password</label>
-          <input name="confirm_password" type="password" class="form-control"
-                 autocomplete="new-password" required minlength="8">
-        </div>
-        <button class="btn btn-primary">Update password</button>
       </form>
     </div>
 
