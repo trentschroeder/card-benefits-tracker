@@ -219,7 +219,7 @@
     /* ── Navbar ───────────────────────────────────────────────── */
     .navbar { background: var(--nav-bg) !important; border-bottom: 1px solid var(--border-color); }
     .navbar-brand, .navbar .nav-link { color: var(--text-nav) !important; }
-    .navbar-brand { color: var(--text-nav-brand) !important; font-weight: 700; }
+    .navbar-brand { color: var(--text-nav-brand) !important; font-weight: 800; font-size: 1.55rem; letter-spacing: -.02em; }
     .navbar .nav-link:hover { color: var(--text-nav-hover) !important; }
     .navbar .nav-link.active { color: var(--text-nav-hover) !important; font-weight: 600; }
     /* Separator between the main modules and the admin/account menus */
@@ -577,7 +577,7 @@
       /* On mobile, only the theme toggle stays in the top bar */
       .navbar .nav-item:not(.theme-toggle-item) { display: none !important; }
       .navbar .theme-toggle { margin-left: 0; }
-      .navbar-brand { font-size: 1.05rem; }
+      .navbar-brand { font-size: 1.35rem; }
 
       /* Container — tighter side gutters, native-feel spacing */
       .container-lg {
@@ -880,9 +880,7 @@
 {% if g.user %}
 <nav class="navbar navbar-expand-lg mb-4">
   <div class="container-lg">
-    <a class="navbar-brand fw-bold" href="{{ url_for('dashboard') }}">
-      <i class="bi bi-coin me-1"></i> Dimes
-    </a>
+    <a class="navbar-brand fw-bold" href="{{ url_for('dashboard') }}">Dimes</a>
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navMenu">
       <span class="navbar-toggler-icon" style="filter:invert(1)"></span>
     </button>
