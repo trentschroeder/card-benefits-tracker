@@ -1,5 +1,5 @@
 {% extends 'base.html' %}
-{% block title %}{% if subscription %}Edit {{ subscription.name }}{% else %}Add subscription{% endif %} — Card Benefits{% endblock %}
+{% block title %}{% if subscription %}Edit {{ subscription.name }}{% else %}Add subscription{% endif %} — Dimes{% endblock %}
 {% block content %}
 
 {% set is_inactive = form.get('inactive') or form.get('active') == 0 %}

@@ -1,7 +1,7 @@
 {
-  "name": "Card Benefits",
-  "short_name": "Benefits",
-  "description": "Track credit card benefits and redemptions",
+  "name": "Dimes",
+  "short_name": "Dimes",
+  "description": "Track card benefits, offers, and subscriptions",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

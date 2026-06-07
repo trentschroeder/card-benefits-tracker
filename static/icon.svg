@@ -4,15 +4,15 @@
       <stop offset="0%" stop-color="#0a0d28"/>
       <stop offset="100%" stop-color="#04040f"/>
     </linearGradient>
-    <linearGradient id="card" x1="0" y1="0" x2="1" y2="1">
+    <linearGradient id="coin" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0%" stop-color="#00e5ff"/>
       <stop offset="100%" stop-color="#c060ff"/>
     </linearGradient>
   </defs>
   <rect width="512" height="512" rx="112" ry="112" fill="url(#bg)"/>
-  <rect x="96" y="156" width="320" height="200" rx="24" ry="24" fill="url(#card)"/>
-  <rect x="96" y="196" width="320" height="36" fill="#04040f" opacity="0.55"/>
-  <rect x="128" y="296" width="96" height="24" rx="6" ry="6" fill="#04040f" opacity="0.45"/>
-  <circle cx="356" cy="308" r="22" fill="#04040f" opacity="0.35"/>
-  <circle cx="388" cy="308" r="22" fill="#04040f" opacity="0.25"/>
+  <circle cx="256" cy="256" r="150" fill="url(#coin)"/>
+  <circle cx="256" cy="256" r="150" fill="none" stroke="#08102e" stroke-opacity="0.22" stroke-width="16"/>
+  <text x="256" y="256" text-anchor="middle" dominant-baseline="central"
+        font-family="Arial, Helvetica, sans-serif" font-weight="700" font-size="210"
+        fill="#08102e">$</text>
 </svg>

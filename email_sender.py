@@ -10,7 +10,7 @@ def send_link_invite_email(gmail_user, gmail_app_password, recipient, accept_url
     html = f"""
     <html><body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#333;max-width:560px;">
       <h2 style="color:#1a3c8a;">Account link invitation</h2>
-      <p><strong>{escape(inviter_email)}</strong> wants to link accounts with you on Card Benefits.</p>
+      <p><strong>{escape(inviter_email)}</strong> wants to link accounts with you on Dimes.</p>
       <p>If you accept, the two of you share <strong>everything</strong> — all cards, benefits, redemptions, and offers become one shared wallet, and either of you can add, edit, or redeem any of it. You each keep your own login, your own reminder email address, and your own on/off switch for reminder emails.</p>
       <p style="margin:24px 0;">
         <a href="{accept_url}" style="background:#1a3c8a;color:#fff;text-decoration:none;
@@ -40,7 +40,7 @@ def send_link_invite_email(gmail_user, gmail_app_password, recipient, accept_url
 
 
 def send_reset_email(gmail_user, gmail_app_password, recipient, reset_url):
-    subject = "Reset your Card Benefits password"
+    subject = "Reset your Dimes password"
     html = f"""
     <html><body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#333;max-width:560px;">
       <h2 style="color:#1a3c8a;">Reset your password</h2>
@@ -74,10 +74,10 @@ def send_reset_email(gmail_user, gmail_app_password, recipient, reset_url):
 
 
 def send_invite_email(gmail_user, gmail_app_password, recipient, accept_url, inviter_email):
-    subject = f"You've been invited to Card Benefits"
+    subject = f"You've been invited to Dimes"
     html = f"""
     <html><body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#333;max-width:560px;">
-      <h2 style="color:#1a3c8a;">You're invited to Card Benefits</h2>
+      <h2 style="color:#1a3c8a;">You're invited to Dimes</h2>
       <p><strong>{escape(inviter_email)}</strong> has invited you to track your credit card benefits and redemptions.</p>
       <p>Click the button below to set your password and get started. This link is good for 7 days.</p>
       <p style="margin:24px 0;">
@@ -230,7 +230,7 @@ def send_reminder_email(gmail_user, gmail_app_password, recipient, benefits_due,
     else:
         preheader = f"{n_o} offer{'s' if n_o != 1 else ''} you haven't used yet."
         heading   = f"{n_o} offer{'s' if n_o != 1 else ''} to use"
-        intro     = "These gift cards, coupons and promotions are still unredeemed. Open Card Benefits to mark them used once you do."
+        intro     = "These gift cards, coupons and promotions are still unredeemed. Open Dimes to mark them used once you do."
         footer_note = "You can change an offer's reminder schedule, or mark it used, from the Offers page in your wallet."
 
     benefits_row = f'<tr><td style="padding:16px 24px 4px;">{blocks}</td></tr>' if benefits_due else ''
@@ -255,7 +255,7 @@ def send_reminder_email(gmail_user, gmail_app_password, recipient, benefits_due,
              style="width:600px;max-width:100%;background:#ffffff;border-radius:14px;overflow:hidden;border:1px solid #e1e6f0;">
         <tr><td style="background:#1a3c8a;padding:20px 24px;">
           <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
-            <td style="font:700 18px {font};color:#ffffff;">&#128179;&nbsp; Card Benefits</td>
+            <td style="font:700 18px {font};color:#ffffff;">&#129689;&nbsp; Dimes</td>
             <td align="right" style="font:600 12px {font};color:#aac4ff;letter-spacing:.04em;text-transform:uppercase;">Reminder</td>
           </tr></table>
         </td></tr>
@@ -269,7 +269,7 @@ def send_reminder_email(gmail_user, gmail_app_password, recipient, benefits_due,
         {offers_row}
         <tr><td style="padding:4px 24px 26px;">
           <div style="border-top:1px solid #eef1f6;padding-top:16px;font:400 12px {font};color:#98a2b3;line-height:1.6;">
-            Sent by <a href="https://cardbenefits.trentschroeder.com" style="color:#1a3c8a;text-decoration:none;">Card Benefits</a>.
+            Sent by <a href="https://cardbenefits.trentschroeder.com" style="color:#1a3c8a;text-decoration:none;">Dimes</a>.
             {footer_note}
           </div>
         </td></tr>
