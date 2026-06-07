@@ -2,107 +2,6 @@
 {% block title %}Offers — Card Benefits{% endblock %}
 {% block content %}
 
-<style>
-  .offers-page .offer-card {
-    border-radius: 16px;
-    padding: 1rem 1.1rem;
-    transition: transform .12s ease, box-shadow .2s ease;
-  }
-  .offers-page .offer-row {
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    gap: 1rem;
-  }
-  .offers-page .offer-info { min-width: 0; flex: 1 1 auto; }
-
-  /* Leading icon + title */
-  .offers-page .offer-lead { display: flex; gap: .7rem; align-items: flex-start; }
-  .offers-page .offer-icon {
-    flex: 0 0 auto;
-    width: 42px; height: 42px;
-    border-radius: 12px;
-    display: flex; align-items: center; justify-content: center;
-    font-size: 1.2rem;
-    color: var(--bs-link-color, #1a3c8a);
-    background: color-mix(in srgb, var(--bs-link-color, #1a3c8a) 16%, transparent);
-    border: 1px solid color-mix(in srgb, var(--bs-link-color, #1a3c8a) 30%, transparent);
-  }
-  .offers-page .offer-card.is-expired .offer-icon {
-    color: var(--text-muted);
-    background: color-mix(in srgb, var(--text-muted) 14%, transparent);
-    border-color: var(--border-color);
-  }
-  .offers-page .offer-headwrap { min-width: 0; }
-  .offers-page .offer-name { font-weight: 600; font-size: 1.05rem; line-height: 1.25; }
-  .offers-page .offer-desc { color: var(--text-muted); font-size: .88rem; margin-top: .1rem; }
-
-  /* Urgency pill */
-  .offers-page .offer-pill {
-    display: inline-block; vertical-align: middle;
-    font-size: .72rem; font-weight: 700; line-height: 1;
-    padding: .28rem .55rem; border-radius: 999px; margin-left: .15rem;
-    white-space: nowrap;
-  }
-  .offers-page .pill-ok   { background: color-mix(in srgb, #16a34a 22%, transparent); color: #16a34a; }
-  .offers-page .pill-warn { background: color-mix(in srgb, #ea7317 24%, transparent); color: #f08a2c; }
-  .offers-page .pill-danger { background: color-mix(in srgb, #dc2626 24%, transparent); color: #f1556b; }
-
-  /* Balance */
-  .offers-page .offer-balance-line { margin-top: .7rem; display: flex; align-items: baseline; gap: .4rem; }
-  .offers-page .offer-balance { font-size: 1.25rem; font-weight: 700; letter-spacing: -.01em; }
-  .offers-page .offer-balance-sub { color: var(--text-muted); font-size: .85rem; }
-
-  /* Remaining-value bar (full = lots left) */
-  .offers-page .offer-bar {
-    height: 8px; border-radius: 999px; margin-top: .45rem;
-    background: var(--progress-bg); overflow: hidden;
-  }
-  .offers-page .offer-bar > span { display: block; height: 100%; border-radius: 999px; transition: width .3s ease; }
-
-  /* Info chips */
-  .offers-page .offer-chips { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: .65rem; }
-  .offers-page .offer-chip {
-    display: inline-flex; align-items: center; gap: .3rem;
-    font-size: .76rem; color: var(--text-muted);
-    background: color-mix(in srgb, var(--bg-card) 55%, var(--border-color) 45%);
-    border: 1px solid var(--border-color);
-    padding: .22rem .55rem; border-radius: 999px;
-  }
-  .offers-page .offer-chip i { font-size: .8rem; opacity: .85; }
-
-  /* Actions */
-  .offers-page .offer-actions {
-    display: flex; flex-direction: column; gap: .5rem;
-    align-items: flex-end; white-space: nowrap;
-  }
-  .offers-page .offer-actions-secondary { display: flex; gap: .5rem; }
-  /* Center each button's icon/text on both axes so the Redeem, edit and delete
-     icons line up — Bootstrap's inline-block .btn would otherwise top-align the
-     glyph inside our taller (min-height) buttons. */
-  .offers-page .offer-actions .btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-  }
-
-  @media (max-width: 768px) {
-    .offers-page .offer-card { padding: 1.1rem 1.15rem !important; }
-    .offers-page .offer-row { flex-direction: column; gap: 1rem; }
-    .offers-page .offer-name { font-size: 1.1rem; }
-    .offers-page .offer-balance { font-size: 1.35rem; }
-    /* Action row spans full width: big primary button + icon buttons */
-    .offers-page .offer-actions {
-      flex-direction: row; width: 100%; align-items: stretch; gap: .6rem;
-    }
-    .offers-page .offer-actions > .offer-redeem { flex: 1 1 auto; min-height: 48px; font-size: 15px; }
-    .offers-page .offer-actions-secondary { flex: 0 0 auto; }
-    .offers-page .offer-actions-secondary .btn { width: 52px; min-height: 48px; }
-  }
-</style>
-
-<div class="offers-page">
-
 <div class="d-flex justify-content-between align-items-center mb-3">
   <h2 class="mb-0"><i class="bi bi-tag-fill me-2"></i>Offers</h2>
   <a href="{{ url_for('offer_new') }}" class="btn btn-primary btn-sm">
@@ -124,60 +23,60 @@
 {% endif %}
 
 {% for o in offers %}
-<div class="card mb-3 offer-card{% if o.expired %} is-expired{% endif %}">
-  <div class="offer-row">
-    <div class="offer-info">
-      <div class="offer-lead">
-        <div class="offer-icon">
+<div class="card mb-3 mod-card{% if o.expired %} is-muted{% endif %}">
+  <div class="mod-row">
+    <div class="mod-info">
+      <div class="mod-lead">
+        <div class="mod-icon">
           <i class="bi {{ 'bi-gift' if o.amount is not none else 'bi-ticket-perforated' }}"></i>
         </div>
-        <div class="offer-headwrap">
+        <div class="mod-headwrap">
           <div>
-            <span class="offer-name">{{ o.name }}</span>
+            <span class="mod-name">{{ o.name }}</span>
             {% if o.expiration_date and o.days_left is not none %}
               {% if o.expired %}
-                <span class="offer-pill pill-danger">Expired</span>
+                <span class="mod-pill pill-danger">Expired</span>
               {% elif o.days_left <= 3 %}
-                <span class="offer-pill pill-danger">{{ 'Today' if o.days_left <= 0 else o.days_left ~ 'd left' }}</span>
+                <span class="mod-pill pill-danger">{{ 'Today' if o.days_left <= 0 else o.days_left ~ 'd left' }}</span>
               {% elif o.days_left <= 7 %}
-                <span class="offer-pill pill-warn">{{ o.days_left }}d left</span>
+                <span class="mod-pill pill-warn">{{ o.days_left }}d left</span>
               {% else %}
-                <span class="offer-pill pill-ok">{{ o.days_left }}d left</span>
+                <span class="mod-pill pill-ok">{{ o.days_left }}d left</span>
               {% endif %}
             {% endif %}
           </div>
-          {% if o.description %}<div class="offer-desc">{{ o.description }}</div>{% endif %}
+          {% if o.description %}<div class="mod-desc">{{ o.description }}</div>{% endif %}
         </div>
       </div>
 
       {% if o.amount is not none %}
         {% set rem_pct = 100 - o.pct_used %}
-        <div class="offer-balance-line">
-          <span class="offer-balance">${{ '%.2f' | format(o.remaining) }}</span>
-          <span class="offer-balance-sub">left of ${{ '%.2f' | format(o.amount) }}</span>
+        <div class="mod-metric-line">
+          <span class="mod-metric">${{ '%.2f' | format(o.remaining) }}</span>
+          <span class="mod-metric-sub">left of ${{ '%.2f' | format(o.amount) }}</span>
         </div>
-        <div class="offer-bar">
+        <div class="mod-bar">
           <span style="width: {{ rem_pct }}%; background: {{ '#16a34a' if rem_pct >= 50 else ('#ea7317' if rem_pct >= 20 else '#dc2626') }};"></span>
         </div>
       {% endif %}
 
       {% if o.expiration_display or o.reminder_days %}
-      <div class="offer-chips">
+      <div class="mod-chips">
         {% if o.expiration_display %}
-          <span class="offer-chip"><i class="bi bi-calendar-event"></i>Expires {{ o.expiration_display }}</span>
+          <span class="mod-chip"><i class="bi bi-calendar-event"></i>Expires {{ o.expiration_display }}</span>
         {% endif %}
         {% if o.reminder_days %}
-          <span class="offer-chip"><i class="bi bi-bell"></i>{{ o.reminder_days | join(', ') }}d before</span>
+          <span class="mod-chip"><i class="bi bi-bell"></i>{{ o.reminder_days | join(', ') }}d before</span>
         {% endif %}
       </div>
       {% endif %}
     </div>
 
-    <div class="offer-actions">
-      <button type="button" class="btn btn-outline-primary btn-sm offer-redeem" data-bs-toggle="modal" data-bs-target="#redeemModal{{ o.id }}">
+    <div class="mod-actions">
+      <button type="button" class="btn btn-outline-primary btn-sm mod-primary" data-bs-toggle="modal" data-bs-target="#redeemModal{{ o.id }}">
         <i class="bi bi-check2-circle me-1"></i>{{ 'Redeem' if o.amount is not none else 'Mark used' }}
       </button>
-      <div class="offer-actions-secondary">
+      <div class="mod-actions-secondary">
         <a href="{{ url_for('offer_edit', id=o.id) }}" class="btn btn-outline-secondary btn-sm" title="Edit" aria-label="Edit offer">
           <i class="bi bi-pencil"></i>
         </a>
@@ -251,7 +150,5 @@
   </div>
 </div>
 {% endfor %}
-
-</div>{# /.offers-page #}
 
 {% endblock %}

@@ -768,6 +768,78 @@
     @media (display-mode: standalone) {
       body { overscroll-behavior-y: contain; }
     }
+
+    /* ── Module list cards (shared by Offers & Subscriptions) ──────────────
+       One card skeleton: leading tinted icon, name (+ optional pill), optional
+       description, an optional prominent metric line, info chips, and a right
+       column of actions (a primary button + edit/delete). */
+    .mod-card { border-radius: 16px; padding: 1rem 1.1rem; }
+    .mod-row  { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; }
+    .mod-info { min-width: 0; flex: 1 1 auto; }
+    .mod-lead { display: flex; gap: .7rem; align-items: flex-start; }
+    .mod-icon {
+      flex: 0 0 auto; width: 42px; height: 42px; border-radius: 12px;
+      display: flex; align-items: center; justify-content: center; font-size: 1.2rem;
+      color: var(--bs-link-color, #1a3c8a);
+      background: color-mix(in srgb, var(--bs-link-color, #1a3c8a) 16%, transparent);
+      border: 1px solid color-mix(in srgb, var(--bs-link-color, #1a3c8a) 30%, transparent);
+    }
+    .mod-headwrap { min-width: 0; }
+    .mod-name { font-weight: 600; font-size: 1.05rem; line-height: 1.25; }
+    .mod-desc { color: var(--text-muted); font-size: .88rem; margin-top: .1rem; }
+    /* Dimmed state for expired offers / inactive subscriptions */
+    .mod-card.is-muted { opacity: .85; }
+    .mod-card.is-muted .mod-name { color: var(--text-muted); }
+    .mod-card.is-muted .mod-icon {
+      color: var(--text-muted);
+      background: color-mix(in srgb, var(--text-muted) 14%, transparent);
+      border-color: var(--border-color);
+    }
+    /* Status / urgency pill next to the name */
+    .mod-pill {
+      display: inline-block; vertical-align: middle; white-space: nowrap;
+      font-size: .72rem; font-weight: 700; line-height: 1;
+      padding: .28rem .55rem; border-radius: 999px; margin-left: .15rem;
+    }
+    .pill-ok     { background: color-mix(in srgb, #16a34a 22%, transparent); color: #16a34a; }
+    .pill-warn   { background: color-mix(in srgb, #ea7317 24%, transparent); color: #f08a2c; }
+    .pill-danger { background: color-mix(in srgb, #dc2626 24%, transparent); color: #f1556b; }
+    .pill-muted  { background: color-mix(in srgb, var(--text-muted) 18%, transparent); color: var(--text-muted); }
+    /* Prominent metric line (offer balance / subscription amount) */
+    .mod-metric-line { margin-top: .7rem; display: flex; align-items: baseline; gap: .4rem; }
+    .mod-metric { font-size: 1.25rem; font-weight: 700; letter-spacing: -.01em; }
+    .mod-metric-sub { color: var(--text-muted); font-size: .85rem; }
+    .mod-bar { height: 8px; border-radius: 999px; margin-top: .45rem; background: var(--progress-bg); overflow: hidden; }
+    .mod-bar > span { display: block; height: 100%; border-radius: 999px; transition: width .3s ease; }
+    /* Info chips */
+    .mod-chips { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: .65rem; }
+    .mod-chip {
+      display: inline-flex; align-items: center; gap: .3rem;
+      font-size: .76rem; color: var(--text-muted);
+      background: color-mix(in srgb, var(--bg-card) 55%, var(--border-color) 45%);
+      border: 1px solid var(--border-color); padding: .22rem .55rem; border-radius: 999px;
+    }
+    .mod-chip i { font-size: .8rem; opacity: .85; }
+    /* Actions column: a primary button (sometimes wrapped in a POST form) + icons */
+    .mod-actions { display: flex; flex-direction: column; gap: .5rem; align-items: flex-end; white-space: nowrap; }
+    .mod-actions .btn { display: inline-flex; align-items: center; justify-content: center; }
+    .mod-actions-secondary { display: flex; gap: .5rem; }
+    .mod-actions > form.mod-primary { margin: 0; }
+  </style>
+  <style>
+    @media (max-width: 768px) {
+      /* Stack the card and let the action row span full width with big targets */
+      .mod-card { padding: 1.1rem 1.15rem !important; }
+      .mod-row  { flex-direction: column; gap: 1rem; }
+      .mod-name { font-size: 1.1rem; }
+      .mod-metric { font-size: 1.35rem; }
+      .mod-actions { flex-direction: row; width: 100%; align-items: stretch; gap: .6rem; }
+      .mod-actions > .mod-primary { flex: 1 1 auto; }
+      .mod-actions > .mod-primary.btn { min-height: 48px; font-size: 15px; }
+      .mod-actions > form.mod-primary > .btn { width: 100%; min-height: 48px; font-size: 15px; }
+      .mod-actions-secondary { flex: 0 0 auto; }
+      .mod-actions-secondary .btn { width: 52px; min-height: 48px; }
+    }
   </style>
   <!-- Single app theme (AI). The data-theme is hardcoded on <html>; clear any
        legacy saved preference so older sessions don't apply light/dark. -->
