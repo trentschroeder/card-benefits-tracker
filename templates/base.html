@@ -868,7 +868,6 @@
             <i class="bi bi-person-circle me-1"></i>Account
           </a>
           <ul class="dropdown-menu dropdown-menu-end">
-            <li><h6 class="dropdown-header text-truncate" style="max-width:240px;">{{ g.user.email }}</h6></li>
             <li><a class="dropdown-item {% if request.path == '/settings' %}active{% endif %}"
                    href="{{ url_for('settings') }}"><i class="bi bi-gear me-2"></i>Settings</a></li>
             <li><hr class="dropdown-divider"></li>
