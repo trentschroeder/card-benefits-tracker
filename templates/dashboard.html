@@ -1,7 +1,19 @@
 {% extends 'base.html' %}
 {% block title %}Card Benefits — Dimes{% endblock %}
 
-{% block head %}{% include '_list_cards.css.html' %}{% endblock %}
+{% block head %}{% include '_list_cards.css.html' %}
+<style>
+  /* Summary stat grid: 2×2 on mobile, 1×4 on desktop, with dividers. */
+  .stat-grid > [class*="col-"]:nth-child(2n) { border-left: 1px solid var(--border-color); }
+  .stat-grid > [class*="col-"]:nth-child(n+3) {
+    border-top: 1px solid var(--border-color);
+    padding-top: .4rem; margin-top: .25rem;
+  }
+  @media (min-width: 768px) {
+    .stat-grid > [class*="col-"] { border-top: 0; padding-top: 0; margin-top: 0; }
+    .stat-grid > [class*="col-"]:not(:first-child) { border-left: 1px solid var(--border-color); }
+  }
+</style>{% endblock %}
 
 {% block content %}
 
@@ -14,16 +26,27 @@
 
 {% if dashboard_cards %}
 <div class="card mb-4 py-2 px-3">
-  <div class="row text-center g-0">
-    <div class="col-4 border-end">
+  <div class="row text-center g-0 stat-grid">
+    <div class="col-6 col-md-3">
       <div class="fs-4 fw-bold text-primary">${{ total_captured | int }}</div>
       <div class="text-muted" style="font-size:.73rem;">Captured YTD</div>
     </div>
-    <div class="col-4 border-end">
+    <div class="col-6 col-md-3">
       <div class="fs-4 fw-bold">${{ total_fees | int }}</div>
       <div class="text-muted" style="font-size:.73rem;">Annual Fees</div>
     </div>
-    <div class="col-4">
+    <div class="col-6 col-md-3">
+      {% if total_fees > 0 %}
+      <div class="fs-4 fw-bold {% if total_net >= 0 %}text-success{% else %}text-danger{% endif %}">
+        {% if total_net >= 0 %}+{% endif %}${{ total_net | int }}
+      </div>
+      <div class="text-muted" style="font-size:.73rem;">Net {% if total_net >= 0 %}(ahead){% else %}(to break even){% endif %}</div>
+      {% else %}
+      <div class="fs-4 fw-bold text-success">+${{ total_captured | int }}</div>
+      <div class="text-muted" style="font-size:.73rem;">Net (no fees)</div>
+      {% endif %}
+    </div>
+    <div class="col-6 col-md-3">
       <div class="fs-4 fw-bold {% if due_in_30 > 0 %}text-warning{% else %}text-success{% endif %}">{{ due_in_30 }}</div>
       <div class="text-muted" style="font-size:.73rem;">Due in 30 Days</div>
     </div>
@@ -90,6 +113,20 @@
       </div>
       {% if roi.fee_tick_pct %}
       <div class="roi-fee-tick" style="left:{{ roi.fee_tick_pct }}%;"></div>
+      {% endif %}
+    </div>
+    <div class="roi-verdict">
+      {% if roi.net is not none %}
+        {% if roi.net >= 0 %}
+        <span class="text-success fw-semibold"><i class="bi bi-check-circle-fill me-1"></i>Worth it · +${{ roi.net | int }}</span>
+        {% else %}
+        <span class="text-danger fw-semibold"><i class="bi bi-exclamation-circle me-1"></i>${{ (-roi.net) | int }} to break even</span>
+        {% endif %}
+      {% else %}
+        <span class="text-muted">No annual fee</span>
+      {% endif %}
+      {% if roi.remaining > 0 %}
+      <span class="text-muted">${{ roi.remaining | int }} left this year</span>
       {% endif %}
     </div>
   </div>

@@ -1677,6 +1677,11 @@ def dashboard():
             'fee_pct':       min(100, int(captured / annual_fee * 100)) if annual_fee > 0 else None,
             'max_pct':       min(100, int(captured / max_possible * 100)) if max_possible > 0 else 0,
             'fee_tick_pct':  min(100, int(annual_fee / max_possible * 100)) if (annual_fee > 0 and max_possible > 0) else None,
+            # Net vs. annual fee: positive = card has paid for itself this year.
+            # None when the card has no annual fee (no break-even to clear).
+            'net':           (captured - annual_fee) if annual_fee > 0 else None,
+            # Value still claimable this year if every remaining credit is used.
+            'remaining':     max(0.0, max_possible - captured),
         }
         # Render-friendly card dict: catalog id + name + fee, plus per-instance nickname
         card_view = {
@@ -1699,6 +1704,7 @@ def dashboard():
 
     total_captured = sum(dc['roi']['captured'] for dc in dashboard_cards)
     total_fees     = sum(dc['card']['annual_fee'] or 0 for dc in dashboard_cards)
+    total_net      = total_captured - total_fees
     due_in_30      = sum(
         1 for dc in dashboard_cards
         for b in dc['benefits']
@@ -1712,6 +1718,7 @@ def dashboard():
                            total_used=total_used,
                            total_captured=total_captured,
                            total_fees=total_fees,
+                           total_net=total_net,
                            due_in_30=due_in_30)
 
 
