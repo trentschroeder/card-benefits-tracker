@@ -154,7 +154,7 @@
     .alert-info    { background: color-mix(in srgb, var(--bg-card) 70%, #0dcaf0 30%); border-color: #0dcaf0; color: var(--text-primary); }
 
     /* ── Toasts ───────────────────────────────────────────────
-       Flash messages render as prominent toasts centered at top. */
+       Flash messages render as prominent toasts centered at bottom. */
     .toast-container.flash-toasts {
       z-index: 1100;
       max-width: min(560px, 92vw);
@@ -209,8 +209,8 @@
     [data-theme="ai"] .toast-container.flash-toasts .toast.toast-danger  { box-shadow: 0 0 24px rgba(255,60,90,.45),  0 8px 32px rgba(0,0,0,.6); }
     [data-theme="ai"] .toast-container.flash-toasts .toast.toast-warning { box-shadow: 0 0 24px rgba(255,200,0,.4),   0 8px 32px rgba(0,0,0,.6); }
     @keyframes flashToastIn {
-      from { opacity: 0; transform: translateY(-20px) scale(.95); }
-      to   { opacity: 1; transform: translateY(0)    scale(1);    }
+      from { opacity: 0; transform: translateY(20px) scale(.95); }
+      to   { opacity: 1; transform: translateY(0)   scale(1);    }
     }
     .toast-container.flash-toasts .toast.show { animation: flashToastIn .25s ease-out; }
     .form-check-input { background-color: var(--bg-input); border-color: var(--input-border); }
@@ -756,9 +756,9 @@
       }
       .modal-fullscreen-sm-down .modal-content::before { display: none; }
 
-      /* Toast position — push below the sticky top bar */
+      /* Toast position — lift above the bottom tab bar */
       .toast-container.flash-toasts {
-        top: calc(var(--safe-top) + 8px) !important;
+        bottom: calc(var(--tabbar-h) + var(--safe-bottom) + 8px) !important;
       }
     }
 
@@ -930,7 +930,7 @@
 
 {% with messages = get_flashed_messages(with_categories=true) %}
   {% if messages %}
-  <div class="toast-container flash-toasts position-fixed top-0 start-50 translate-middle-x p-3">
+  <div class="toast-container flash-toasts position-fixed bottom-0 start-50 translate-middle-x p-3">
     {% for category, message in messages %}
       {% set icon_map = {'success': 'check-circle-fill', 'danger': 'exclamation-triangle-fill', 'warning': 'exclamation-triangle-fill', 'info': 'info-circle-fill'} %}
       <div class="toast toast-{{ category }} fade show" role="alert"
