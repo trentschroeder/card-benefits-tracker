@@ -1847,7 +1847,7 @@ def card_templates_add(card_id):
               'adjust them on each benefit.', 'success')
     else:
         flash(f'Added "{label}" to your wallet.', 'success')
-    return redirect(url_for('card_detail', id=new_uc_id))
+    return redirect(url_for('dashboard'))
 
 
 @app.route('/link-account', methods=['POST'])
@@ -1994,7 +1994,7 @@ def user_card_rename(id):
     db.commit()
     db.close()
     flash('Card renamed.', 'success')
-    return redirect(url_for('card_detail', id=id))
+    return redirect(url_for('dashboard'))
 
 
 @app.route('/cards/<int:id>/remove', methods=['POST'])
@@ -2026,9 +2026,9 @@ def card_remove(id):
 @app.route('/cards')
 @login_required
 def cards_list():
-    """Deprecated: the Cards list page was removed. Per-card management now
-    lives on card_detail, reached from the dashboard's "Open card" link. Kept
-    as a redirect so old bookmarks/links land on the dashboard instead of 404ing."""
+    """Deprecated: the Cards list page was removed. The dashboard is the only
+    per-card surface now; rename/remove live in its per-card options modal.
+    Kept as a redirect so old bookmarks/links land there instead of 404ing."""
     return redirect(url_for('dashboard'))
 
 
@@ -2052,70 +2052,23 @@ def card_new():
             'INSERT INTO cards (name, annual_fee, published) VALUES (?, ?, ?)',
             (name, annual_fee, published))
         cid = cur.lastrowid
-        cur = db.execute(
+        db.execute(
             'INSERT INTO user_cards (user_id, card_id, active) VALUES (?, ?, 1)',
             (g.user['id'], cid))
-        new_uc_id = cur.lastrowid
         db.commit()
         db.close()
-        flash(f'Card "{name}" added.', 'success')
-        return redirect(url_for('card_detail', id=new_uc_id))
+        flash(f'Card "{name}" added. Add its benefits below.', 'success')
+        return redirect(url_for('catalog_card_edit', card_id=cid))
     return render_template('cards/form.html', form={})
 
 
 @app.route('/cards/<int:id>', methods=['GET'])
 @login_required
 def card_detail(id):
-    """Render a single user_cards instance: its nickname, the underlying
-    catalog card, and per-instance benefit usage."""
-    db  = get_db()
-    uid = g.user['id']
-    ids = linked_user_ids(db, uid)
-    ph  = ','.join('?' * len(ids))
-    row = db.execute(f'''
-        SELECT uc.id            AS user_card_id,
-               uc.card_id       AS card_id,
-               uc.nickname      AS nickname,
-               uc.share_group_id,
-               uc.active        AS uc_active,
-               c.name           AS card_name,
-               c.annual_fee     AS annual_fee,
-               c.active         AS card_active,
-               c.published      AS published
-        FROM user_cards uc
-        JOIN cards c ON c.id = uc.card_id
-        WHERE uc.id = ? AND uc.user_id IN ({ph})
-    ''', (id, *ids)).fetchone()
-    if not row:
-        db.close()
-        flash('Card not found.', 'danger')
-        return redirect(url_for('dashboard'))
-
-    raw_benefits = db.execute('''
-        SELECT b.*, COALESCE(ub.active, 1) AS user_active
-        FROM benefits b
-        LEFT JOIN user_benefits ub ON ub.benefit_id = b.id AND ub.user_card_id = ?
-        WHERE b.card_id = ?
-        ORDER BY b.active DESC, b.name
-    ''', (id, row['card_id'])).fetchall()
-    benefits = []
-    for b in raw_benefits:
-        eb = enrich_benefit(db, b, id)
-        eb['user_active'] = b['user_active']
-        benefits.append(eb)
-
-    card = {
-        'id':             row['card_id'],
-        'user_card_id':   row['user_card_id'],
-        'name':           row['card_name'],
-        'annual_fee':     row['annual_fee'],
-        'active':         row['card_active'],
-        'published':      row['published'],
-        'nickname':       row['nickname'],
-        'display_name':   row['nickname'] or row['card_name'],
-    }
-    db.close()
-    return render_template('cards/detail.html', card=card, benefits=benefits)
+    """Deprecated: the per-card detail page was removed — the dashboard is the
+    sole per-card surface. Kept as a redirect so old bookmarks/links to a
+    specific card land on the dashboard instead of 404ing."""
+    return redirect(url_for('dashboard'))
 
 
 # ── Admin catalog routes (operate on cards.id, not user_cards.id) ─────────
@@ -2346,7 +2299,7 @@ def instance_benefit_edit(uc_id, bid):
     if not b:
         db.close()
         flash('Benefit not found on this card.', 'danger')
-        return redirect(url_for('card_detail', id=uc_id))
+        return redirect(url_for('dashboard'))
     card = db.execute('SELECT * FROM cards WHERE id = ?', (b['card_id'],)).fetchone()
 
     if request.method == 'POST':
@@ -2378,11 +2331,11 @@ def instance_benefit_edit(uc_id, bid):
         db.close()
         flash(f'Settings for "{b["name"]}" updated.', 'success')
         # Honor an explicit return target (the benefit page that posted this
-        # form); fall back to the card detail page. Only allow local paths.
+        # form); fall back to the dashboard. Only allow local paths.
         nxt = request.form.get('next', '')
         if nxt.startswith('/') and not nxt.startswith('//'):
             return redirect(nxt)
-        return redirect(url_for('card_detail', id=uc_id))
+        return redirect(url_for('dashboard'))
 
     # GET: the editor is now inline on the benefit page — send the user there.
     db.close()

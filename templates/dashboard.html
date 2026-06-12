@@ -68,9 +68,10 @@
       <span>${{ roi.max_possible | int }} max</span>
     </div>
     {% endif %}
-    <a href="{{ url_for('card_detail', id=uc) }}" class="card-section-edit" title="Open card">
-      <i class="bi bi-pencil"></i>
-    </a>
+    <button type="button" class="card-section-edit border-0 bg-transparent"
+            data-bs-toggle="modal" data-bs-target="#cardSettings{{ uc }}" title="Card options">
+      <i class="bi bi-three-dots-vertical"></i>
+    </button>
   </div>
 
   <div class="card-section-body">
@@ -247,9 +248,41 @@
 {% endfor %}
 </div>{# /wallet-grid #}
 
-<!-- Redeem modals — kept outside the card grid so they don't disrupt its columns -->
+<!-- Card-option + redeem modals — kept outside the card grid so they don't disrupt its columns -->
 {% for dc in dashboard_cards %}
 {% set uc = dc.user_card_id %}
+{% set card = dc.card %}
+
+<!-- Card options: rename + remove -->
+<div class="modal fade" id="cardSettings{{ uc }}" tabindex="-1">
+  <div class="modal-dialog modal-sm">
+    <div class="modal-content">
+      <div class="modal-header py-2">
+        <h6 class="modal-title">{{ dc.display_name }}</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <form method="post" action="{{ url_for('user_card_rename', id=uc) }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <label class="form-label">Nickname</label>
+          <input name="nickname" type="text" class="form-control form-control-sm"
+                 value="{{ dc.nickname or '' }}" placeholder="optional">
+          <div class="form-text mb-2">Only you see this — the card stays <strong>{{ card.name }}</strong>.</div>
+          <button class="btn btn-primary btn-sm">Save name</button>
+        </form>
+        <hr class="my-3">
+        <form method="post" action="{{ url_for('card_remove', id=uc) }}"
+              onsubmit="return confirm('Remove this card from your wallet? Your redemption history is preserved.');">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button class="btn btn-outline-danger btn-sm">
+            <i class="bi bi-dash-circle me-1"></i>Remove from wallet
+          </button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
 {% set pending = dc.benefits | selectattr('fully_used', 'false') | list %}
 {% for b in pending %}
 <div class="modal fade" id="redeemModal{{ uc }}-{{ b.id }}" tabindex="-1">
