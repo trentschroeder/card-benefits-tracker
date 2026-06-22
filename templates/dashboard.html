@@ -10,7 +10,7 @@
     padding-top: .4rem; margin-top: .25rem;
   }
   @media (min-width: 768px) {
-    .stat-grid > [class*="col-"] { border-top: 0; padding-top: 0; margin-top: 0; }
+    .stat-grid > [class*="col-"]:nth-child(n+3) { border-top: 0; padding-top: 0; margin-top: 0; }
     .stat-grid > [class*="col-"]:not(:first-child) { border-left: 1px solid var(--border-color); }
   }
 </style>{% endblock %}
