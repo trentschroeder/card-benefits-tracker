@@ -54,9 +54,14 @@
     color: var(--bs-primary, #0d6efd);
     font-weight: 600;
   }
-  .util-period.is-current .util-bar-wrap {
-    outline: 2px solid var(--bs-primary, #0d6efd);
-    outline-offset: 1px;
+
+  /* On narrow screens, shrink periods and gaps so a full 12-period
+     timeline fits without overflowing off the right edge. */
+  @media (max-width: 575.98px) {
+    .util-timeline { gap: 3px; }
+    .util-period { min-width: 0; }
+    .util-bar-wrap { height: 40px; }
+    .util-label { font-size: .6rem; letter-spacing: 0; }
   }
 
   /* Reminders panel: ignore switch sits in a second column on desktop
