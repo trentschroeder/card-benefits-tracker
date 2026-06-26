@@ -171,10 +171,16 @@ def send_reminder_email(gmail_user, gmail_app_password, recipient, benefits_due,
 
     n   = len(benefits_due)
     n_o = len(offers)
+    # Singular/plural copy: the count word, its verb, and any pronoun all have to
+    # agree, so "1 benefit needs attention" reads right alongside "3 benefits need".
+    b_word = 'benefit' if n == 1 else 'benefits'
+    b_verb = 'needs'   if n == 1 else 'need'
+    o_word = 'offer'   if n_o == 1 else 'offers'
     if benefits_due:
-        subject = f"{n} benefit{'s' if n != 1 else ''} need attention before the deadline"
+        subject = f"{n} {b_word} {b_verb} attention before the deadline"
     else:
-        subject = f"{n_o} offer{'s' if n_o != 1 else ''} to use before they expire"
+        expire = 'it expires' if n_o == 1 else 'they expire'
+        subject = f"{n_o} {o_word} to use before {expire}"
     font = "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif"
 
     blocks = ""
@@ -237,14 +243,20 @@ def send_reminder_email(gmail_user, gmail_app_password, recipient, benefits_due,
     offer_blocks = _offer_blocks_html(offers, font)
 
     if benefits_due:
-        preheader = f"{n} benefit{'s' if n != 1 else ''} with unused credit and a deadline coming up."
-        heading   = f"{n} benefit{'s' if n != 1 else ''} need attention"
-        intro     = "These have unused credit with a deadline coming up. Tap <b>Mark redeemed</b> to log one in a single step."
+        preheader = f"{n} {b_word} with unused credit and a deadline coming up."
+        heading   = f"{n} {b_word} {b_verb} attention"
+        if n == 1:
+            intro = "It has unused credit with a deadline coming up. Tap <b>Mark redeemed</b> to log it in a single step."
+        else:
+            intro = "These have unused credit with a deadline coming up. Tap <b>Mark redeemed</b> to log one in a single step."
         footer_note = "You can change a benefit's reminder schedule from its page in your wallet."
     else:
-        preheader = f"{n_o} offer{'s' if n_o != 1 else ''} you haven't used yet."
-        heading   = f"{n_o} offer{'s' if n_o != 1 else ''} to use"
-        intro     = "These gift cards, coupons and promotions are still unredeemed. Open Dimes to mark them used once you do."
+        preheader = f"{n_o} {o_word} you haven't used yet."
+        heading   = f"{n_o} {o_word} to use"
+        if n_o == 1:
+            intro = "This gift card, coupon or promotion is still unredeemed. Open Dimes to mark it used once you do."
+        else:
+            intro = "These gift cards, coupons and promotions are still unredeemed. Open Dimes to mark them used once you do."
         footer_note = "You can change an offer's reminder schedule, or mark it used, from the Offers page in your wallet."
 
     benefits_row = f'<tr><td style="padding:16px 24px 4px;">{blocks}</td></tr>' if benefits_due else ''
