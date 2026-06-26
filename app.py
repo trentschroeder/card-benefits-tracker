@@ -137,6 +137,25 @@ def _load_redeem_token(token):
         return None
 
 
+def _unsub_serializer():
+    return URLSafeTimedSerializer(app.secret_key, salt='unsubscribe-link')
+
+
+def _make_unsub_token(uid):
+    """Signed token identifying the recipient for the unsubscribe link in emails."""
+    return _unsub_serializer().dumps(int(uid))
+
+
+def _load_unsub_token(token):
+    """Return the user id encoded in an unsubscribe token, or None if invalid.
+    Deliberately non-expiring: an unsubscribe link should keep working however
+    long after the email was sent."""
+    try:
+        return int(_unsub_serializer().loads(token))
+    except (BadData, ValueError, TypeError):
+        return None
+
+
 def login_required(f):
     from functools import wraps
     @wraps(f)
@@ -215,6 +234,7 @@ def init_db():
         ('notification_email', 'TEXT'),
         ('reminders_enabled',  'INTEGER NOT NULL DEFAULT 1'),
         ('summary_enabled',    'INTEGER NOT NULL DEFAULT 1'),
+        ('emails_enabled',     'INTEGER NOT NULL DEFAULT 1'),
         # Account linking. NULL default keeps the REFERENCES clause legal for
         # ALTER ADD COLUMN; account_link_groups was created by executescript above.
         ('link_group_id',      'INTEGER REFERENCES account_link_groups(id) ON DELETE SET NULL'),
@@ -2533,6 +2553,46 @@ def redeem_link_confirm(token):
     return render_template('redeem.html', state='done', token=token, **info)
 
 
+@app.route('/u/<token>', methods=['GET'])
+def unsubscribe_link(token):
+    """Landing page for the unsubscribe link in recurring emails. Authorised by
+    the signed token (no login). GET only shows the current state and a button —
+    it never changes anything, so email-client prefetch can't unsubscribe a user."""
+    uid = _load_unsub_token(token)
+    if uid is None:
+        return render_template('unsubscribe.html', state='invalid'), 400
+    db = get_db()
+    user = db.execute('SELECT email, emails_enabled FROM users WHERE id = ?', (uid,)).fetchone()
+    db.close()
+    if not user:
+        return render_template('unsubscribe.html', state='invalid'), 400
+    return render_template('unsubscribe.html',
+                           state='off' if not user['emails_enabled'] else 'on',
+                           token=token, email=user['email'])
+
+
+@app.route('/u/<token>', methods=['POST'])
+def unsubscribe_confirm(token):
+    """Apply the unsubscribe / re-subscribe choice. Authorised by the signed
+    token (no login) and CSRF-checked like every other form. `action` is
+    'off' (stop emails) or 'on' (resume)."""
+    uid = _load_unsub_token(token)
+    if uid is None:
+        return render_template('unsubscribe.html', state='invalid'), 400
+    db = get_db()
+    user = db.execute('SELECT email FROM users WHERE id = ?', (uid,)).fetchone()
+    if not user:
+        db.close()
+        return render_template('unsubscribe.html', state='invalid'), 400
+    enabled = 0 if request.form.get('action') == 'off' else 1
+    db.execute('UPDATE users SET emails_enabled = ? WHERE id = ?', (enabled, uid))
+    db.commit()
+    db.close()
+    return render_template('unsubscribe.html',
+                           state='off' if not enabled else 'on',
+                           token=token, email=user['email'], just_changed=True)
+
+
 @app.route('/benefits/<int:id>/redeem', methods=['POST'])
 @login_required
 def benefit_redeem(id):
@@ -2883,6 +2943,21 @@ def account_update():
     return redirect(url_for('settings'))
 
 
+@app.route('/preferences/emails', methods=['POST'])
+@login_required
+def email_prefs_update():
+    """Master on/off switch for the recurring emails this user receives (benefit
+    reminders + the monthly subscription digest). Same flag the unsubscribe link
+    in those emails flips."""
+    enabled = 1 if request.form.get('emails_enabled') else 0
+    db = get_db()
+    db.execute('UPDATE users SET emails_enabled = ? WHERE id = ?', (enabled, g.user['id']))
+    db.commit()
+    db.close()
+    flash('Email notifications turned %s.' % ('on' if enabled else 'off'), 'success')
+    return redirect(url_for('settings'))
+
+
 @app.route('/account/close', methods=['POST'])
 @login_required
 def account_close():
@@ -3060,7 +3135,9 @@ def send_test_reminder():
         }]
 
     try:
-        send_reminder_email(gmail_user, gmail_pass, recipient, due, offers=offers_email)
+        unsub_url = f"{base_url}/u/{_make_unsub_token(uid)}"
+        send_reminder_email(gmail_user, gmail_pass, recipient, due,
+                            offers=offers_email, unsubscribe_url=unsub_url)
         flash(f'Test reminder sent to {recipient} — {len(due)} benefit(s).', 'success')
     except Exception as e:
         flash(f'Failed to send email: {e}', 'danger')
@@ -3084,6 +3161,7 @@ def send_test_subscription_digest():
     test_recipient = request.form.get('test_recipient', '').strip() or None
     if test_recipient and g.user['is_admin']:
         recipient = test_recipient
+    base_url = (get_setting(db, 'app_base_url', APP_BASE_URL) or APP_BASE_URL).rstrip('/')
     subs, total = _active_subscriptions_for(db, g.user['id'])
     db.close()
 
@@ -3092,7 +3170,9 @@ def send_test_subscription_digest():
         return redirect(url_for('subscriptions_list'))
     try:
         groups = _subscription_digest_groups(subs)
-        send_subscription_digest_email(gmail_user, gmail_pass, recipient, groups, total)
+        unsub_url = f"{base_url}/u/{_make_unsub_token(g.user['id'])}"
+        send_subscription_digest_email(gmail_user, gmail_pass, recipient, groups, total,
+                                       unsubscribe_url=unsub_url)
         flash(f'Subscriptions summary sent to {recipient} — {len(subs)} active, ${total:,.2f}/mo.', 'success')
     except Exception as e:
         flash(f'Failed to send email: {e}', 'danger')
@@ -3549,12 +3629,14 @@ def _run_reminder_check(force=False):
         db.close()
         return 0
 
-    # Honour the per-user reminders_enabled flag: a user who has turned reminder
-    # emails off gets neither benefit reminders nor offer reminders/footers.
+    # Honour the per-user switches: emails_enabled is the master "send me email"
+    # flag (flipped by the unsubscribe link / Settings toggle); reminders_enabled
+    # is the older reminder-specific flag. Either being off suppresses benefit
+    # reminders and the offer reminders/footers that ride along.
     users = db.execute('''
         SELECT id, email
         FROM users
-        WHERE reminders_enabled = 1
+        WHERE reminders_enabled = 1 AND emails_enabled = 1
     ''').fetchall()
 
     base_url = (get_setting(db, 'app_base_url', APP_BASE_URL) or APP_BASE_URL).rstrip('/')
@@ -3625,7 +3707,9 @@ def _run_reminder_check(force=False):
 
         if benefits_due or due_offer_keys:
             try:
-                send_reminder_email(gmail_user, gmail_pass, recipient, benefits_due, offers=offers_email)
+                unsub_url = f"{base_url}/u/{_make_unsub_token(uid)}"
+                send_reminder_email(gmail_user, gmail_pass, recipient, benefits_due,
+                                    offers=offers_email, unsubscribe_url=unsub_url)
                 for oid, d in due_offer_keys:
                     db.execute(
                         'INSERT OR IGNORE INTO offer_reminder_sends (recipient_user_id, offer_id, days_before) VALUES (?, ?, ?)',
@@ -3691,7 +3775,9 @@ def _run_subscription_digest(force=False):
         return 0
 
     period_ym = today_in_tz(db).strftime('%Y-%m')
-    users = db.execute('SELECT id, email FROM users WHERE summary_enabled = 1').fetchall()
+    base_url = (get_setting(db, 'app_base_url', APP_BASE_URL) or APP_BASE_URL).rstrip('/')
+    users = db.execute(
+        'SELECT id, email FROM users WHERE summary_enabled = 1 AND emails_enabled = 1').fetchall()
     sent = 0
     for user in users:
         uid       = user['id']
@@ -3707,7 +3793,9 @@ def _run_subscription_digest(force=False):
             continue
         try:
             groups = _subscription_digest_groups(subs)
-            send_subscription_digest_email(gmail_user, gmail_pass, recipient, groups, total)
+            unsub_url = f"{base_url}/u/{_make_unsub_token(uid)}"
+            send_subscription_digest_email(gmail_user, gmail_pass, recipient, groups, total,
+                                           unsubscribe_url=unsub_url)
             db.execute(
                 'INSERT OR IGNORE INTO subscription_digest_sends (recipient_user_id, period_ym) VALUES (?, ?)',
                 (uid, period_ym))

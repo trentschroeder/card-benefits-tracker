@@ -142,7 +142,19 @@ def _offer_blocks_html(offers, font):
     return blocks
 
 
-def send_reminder_email(gmail_user, gmail_app_password, recipient, benefits_due, offers=None):
+def _unsubscribe_html(unsubscribe_url, font):
+    """Footer line letting the recipient turn off all recurring email. Shared by
+    the reminder and subscription-digest templates so the wording stays in sync."""
+    if not unsubscribe_url:
+        return ''
+    return (f'<div style="margin-top:8px;">'
+            f'Don\'t want these? '
+            f'<a href="{unsubscribe_url}" style="color:#1a3c8a;text-decoration:underline;">'
+            f'Unsubscribe from all Dimes emails</a>.</div>')
+
+
+def send_reminder_email(gmail_user, gmail_app_password, recipient, benefits_due,
+                        offers=None, unsubscribe_url=None):
     """
     benefits_due: list of dicts with keys:
       card_name, benefit_name, credit_amount,
@@ -150,6 +162,8 @@ def send_reminder_email(gmail_user, gmail_app_password, recipient, benefits_due,
     offers: optional list of dicts (gift cards / coupons / promotions) with keys:
       name, detail, expiration, days_left. When benefits_due is present
       these ride along as an awareness footer; when it's empty they are the email.
+    unsubscribe_url: optional signed link that turns off all recurring email for
+      the recipient; rendered as an unsubscribe line in the footer when present.
     """
     offers = offers or []
     if not benefits_due and not offers:
@@ -271,6 +285,7 @@ def send_reminder_email(gmail_user, gmail_app_password, recipient, benefits_due,
           <div style="border-top:1px solid #eef1f6;padding-top:16px;font:400 12px {font};color:#98a2b3;line-height:1.6;">
             Sent by <a href="https://dimes.trentschroeder.com" style="color:#1a3c8a;text-decoration:none;">Dimes</a>.
             {footer_note}
+            {_unsubscribe_html(unsubscribe_url, font)}
           </div>
         </td></tr>
       </table>
@@ -322,11 +337,13 @@ def send_card_request_email(gmail_user, gmail_app_password, recipients,
         server.sendmail(gmail_user, recipients, msg.as_string())
 
 
-def send_subscription_digest_email(gmail_user, gmail_app_password, recipient, groups, monthly_total):
+def send_subscription_digest_email(gmail_user, gmail_app_password, recipient, groups,
+                                   monthly_total, unsubscribe_url=None):
     """Monthly awareness digest: every active subscription and what it costs per
     month, grouped into category sections to match the Subscriptions page.
     `groups` is an ordered list of dicts with keys: name, subtotal, subs — where
     each sub is a dict with keys name, amount, card_label (or None).
+    unsubscribe_url: optional signed link to turn off all recurring email.
     No-op when there are no active subscriptions."""
     if not groups:
         return
@@ -398,6 +415,7 @@ def send_subscription_digest_email(gmail_user, gmail_app_password, recipient, gr
           <div style="border-top:1px solid #eef1f6;padding-top:16px;font:400 12px {font};color:#98a2b3;line-height:1.6;">
             Sent monthly by <a href="https://dimes.trentschroeder.com" style="color:#1a3c8a;text-decoration:none;">Dimes</a>
             to keep your subscriptions visible. Manage them anytime from the Subscriptions page.
+            {_unsubscribe_html(unsubscribe_url, font)}
           </div>
         </td></tr>
       </table>

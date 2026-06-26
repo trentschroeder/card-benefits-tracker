@@ -1,0 +1,55 @@
+{% extends 'base.html' %}
+{% block title %}
+{%- if state == 'off' %}Unsubscribed{% elif state == 'on' %}Email preferences{% else %}Link invalid{% endif %} — Dimes
+{%- endblock %}
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-sm-9 col-md-7 col-lg-5">
+    <div class="card p-4 mt-4 text-center">
+      {% if state == 'invalid' %}
+        <i class="bi bi-link-45deg display-4 text-muted mb-2"></i>
+        <h4 class="mb-2">Link invalid</h4>
+        <p class="text-muted">This unsubscribe link isn't valid. You can manage email
+          notifications from your account settings instead.</p>
+        <a href="{{ url_for('settings') }}" class="btn btn-primary mt-2">Go to Settings</a>
+
+      {% elif state == 'off' %}
+        <i class="bi bi-bell-slash-fill display-4 text-secondary mb-2"></i>
+        <h4 class="mb-2">{% if just_changed %}You're unsubscribed{% else %}Already unsubscribed{% endif %}</h4>
+        <p class="text-muted">
+          Dimes will no longer send recurring emails (benefit reminders and the monthly
+          subscription summary) to <strong>{{ email }}</strong>. Account emails like
+          password resets are unaffected.
+        </p>
+        <form method="post" class="mt-2">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <input type="hidden" name="action" value="on">
+          <button class="btn btn-outline-primary w-100">
+            <i class="bi bi-bell me-1"></i>Re-enable email notifications
+          </button>
+        </form>
+
+      {% else %}{# on #}
+        <i class="bi bi-envelope-x display-4 text-primary mb-2"></i>
+        <h4 class="mb-2">{% if just_changed %}Email notifications are on{% else %}Unsubscribe from Dimes emails?{% endif %}</h4>
+        <p class="text-muted">
+          {% if just_changed %}
+            Dimes will keep sending recurring emails to <strong>{{ email }}</strong>.
+          {% else %}
+            This turns off all recurring emails (benefit reminders and the monthly
+            subscription summary) for <strong>{{ email }}</strong>. Account emails like
+            password resets still come through.
+          {% endif %}
+        </p>
+        <form method="post" class="mt-2">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <input type="hidden" name="action" value="off">
+          <button class="btn btn-primary w-100">
+            <i class="bi bi-bell-slash me-1"></i>Unsubscribe
+          </button>
+        </form>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}

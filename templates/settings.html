@@ -154,6 +154,25 @@
 
   <div class="col-lg-5">
 
+    <!-- Email notifications master switch (every user) -->
+    <div class="card p-4 mb-4">
+      <h5 class="mb-3"><i class="bi bi-envelope-gear me-2"></i>Email Notifications</h5>
+      <p class="text-muted small">
+        Recurring emails Dimes sends you — benefit reminders and the monthly subscription
+        summary. Turn this off to stop them all. Account emails (password resets, invites)
+        are always sent.
+      </p>
+      <form method="post" action="{{ url_for('email_prefs_update') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="form-check form-switch">
+          <input type="checkbox" name="emails_enabled" value="1" id="emailsEnabled"
+                 class="form-check-input" {% if g.user.emails_enabled %}checked{% endif %}>
+          <label class="form-check-label" for="emailsEnabled">Send me reminder &amp; summary emails</label>
+        </div>
+        <button class="btn btn-primary mt-3">Save</button>
+      </form>
+    </div>
+
     <!-- Send a reminder now (every user) -->
     <div class="card p-4 mb-4">
       <h5 class="mb-3"><i class="bi bi-bell me-2"></i>Send Me a Reminder Now</h5>
@@ -210,7 +229,7 @@
       <ul class="small text-muted mb-0">
         <li class="mb-1">Each benefit has its own reminder triggers (e.g. 7/3/1 days before period end), set per user from the benefit's page.</li>
         <li class="mb-1">An email goes to each user's notification address when today matches a trigger <em>and</em> they still have unused credit on that benefit.</li>
-        <li class="mb-1">Users opt out of a benefit via its <em>Ignore</em> toggle — there's no global off-switch.</li>
+        <li class="mb-1">Users opt out of a single benefit via its <em>Ignore</em> toggle, or turn off all recurring email with the <em>Email Notifications</em> switch (or the Unsubscribe link in any email).</li>
         <li>Each trigger fires at most once per user per period.</li>
       </ul>
     </div>

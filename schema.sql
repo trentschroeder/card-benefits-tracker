@@ -6,6 +6,11 @@ CREATE TABLE IF NOT EXISTS users (
     notification_email TEXT,
     reminders_enabled  INTEGER NOT NULL DEFAULT 1,
     summary_enabled    INTEGER NOT NULL DEFAULT 1,
+    -- Master "send me email" switch, flipped by the unsubscribe link in emails
+    -- and the Settings toggle. 0 = suppress all recurring/notification email
+    -- (reminders + subscription digest); transactional email (password reset,
+    -- invites) is unaffected.
+    emails_enabled     INTEGER NOT NULL DEFAULT 1,
     -- Account linking: two accounts that link share one wallet (cards, benefits,
     -- redemptions, offers). NULL = solo. Both linked users carry the same group id.
     link_group_id      INTEGER REFERENCES account_link_groups(id) ON DELETE SET NULL,
